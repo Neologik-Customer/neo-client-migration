@@ -13,15 +13,24 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 1.0.2](#version-102)
-3. [Version 1.0.1](#version-101)
-4. [Version 1.0.0](#version-100)
+2. [Version 1.0.3](#version-103)
+3. [Version 1.0.2](#version-102)
+4. [Version 1.0.1](#version-101)
+5. [Version 1.0.0](#version-100)
 
 ## Scripts in this version
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.0.2 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+| `Migrate-NeologikEnvironment.ps1` | 1.0.3 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+
+## Version 1.0.3
+
+**Date**: 2026-10-08
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | The upload of the files of the run uses a token for Azure Storage from the same sign-in as the Azure session, and puts the files into the storage account directly. Before this version, the upload asked the Azure session for that token, which a session opened from the sign-in of the script does not hold, and the upload failed with `failed to retrieve access token for resource 'StorageOAuthEndpointResourceId'`. The administrator then sent the files by hand. The sign-in with the device code of Az PowerShell is unchanged |
 
 ## Version 1.0.2
 

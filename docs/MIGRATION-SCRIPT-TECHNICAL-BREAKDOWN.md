@@ -78,6 +78,7 @@ The sign-in requests delegated permissions only. A delegated permission works on
 | Third method | The device code prompt of Az PowerShell |
 | Check after the sign-in | The session selected the subscription that the command names. The signed-in account holds Owner or User Access Administrator on the subscription. A run that writes stops otherwise |
 | Purpose | The role assignments of the deployment identity, the tag on the resource group, the read of the SQL server administrators, and the upload of the files of the run |
+| Upload of the files | A token for Azure Storage from the same sign-in, obtained with its refresh token, or from the Azure CLI with `-UseAzureCliToken`. The files go into the storage account directly, over HTTPS, with the data role Storage Blob Data Contributor of the signed-in administrator |
 
 ### The check of the roles
 
