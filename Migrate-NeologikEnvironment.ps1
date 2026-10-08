@@ -577,7 +577,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.0.0'
+$script:ScriptVersion = '1.0.1'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -2858,13 +2858,77 @@ function Get-NeologikTokenAccountId {
     catch { return '' }
 }
 
+function Get-NeologikRefreshedToken {
+    <#
+    Requests a token for another resource with the refresh token of a completed
+    device code sign-in. The administrator signs in once, and the script holds a
+    token for each resource of that sign-in. Returns the access token. Returns ''
+    when there is no refresh token or the Microsoft identity platform refuses, after
+    the function logs the reason.
+    #>
+    param([string]$ClientId, [string]$RefreshToken, [string[]]$Scopes, [string]$Label)
+    if (-not $RefreshToken) {
+        Write-Log "The sign-in gave no refresh token, so the script cannot obtain the token for $Label" -Level Warning
+        return ''
+    }
+    $base = "$($script:LoginEndpoint)/$($script:State.TenantId)/oauth2/v2.0"
+    try {
+        $answer = Invoke-NeologikTokenRequest -Uri "$base/token" -Body @{
+            grant_type    = 'refresh_token'
+            client_id     = $ClientId
+            refresh_token = $RefreshToken
+            scope         = ($Scopes -join ' ')
+        }
+    }
+    catch {
+        Write-Log "The script could not obtain the token for $Label. $(Get-NeologikErrorText $_)" -Level Warning
+        return ''
+    }
+    if ($answer.StatusCode -ne 200) {
+        Write-Log "The script could not obtain the token for $Label. $(Get-NeologikTokenError $answer.Body)" -Level Warning
+        return ''
+    }
+    return [string](Get-NeologikProperty $answer.Body 'access_token' '')
+}
+
+function Get-NeologikAzureCliGraphToken {
+    # Returns the token for Microsoft Graph of the Azure CLI session, for the Azure
+    # session. Returns '' when the Azure CLI gives none.
+    $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource-type', 'ms-graph',
+        '--tenant', $script:State.TenantId, '--query', 'accessToken', '-o', 'tsv')
+    if ($cli.ExitCode -ne 0) { return '' }
+    return ([string](@($cli.Output) | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 1)).Trim()
+}
+
+function Connect-NeologikAzureSession {
+    <#
+    Opens the Az session from an access token for Azure Resource Manager and the
+    token for Microsoft Graph of the same sign-in. The role assignment commands of
+    Az call Microsoft Graph to resolve each principal, and a session opened from an
+    access token cannot obtain that token itself. Without the second token every
+    role read and every role assignment fails with "Authentication failed against
+    resource MicrosoftGraphEndpointResourceId". Throws when Az refuses the session.
+    #>
+    param([string]$AccessToken, [string]$GraphToken, [string]$AccountId)
+    $state = $script:State
+    $params = @{
+        AccessToken               = $AccessToken
+        MicrosoftGraphAccessToken = $GraphToken
+        AccountId                 = $AccountId
+        Tenant                    = $state.TenantId
+        Subscription              = $state.SubscriptionId
+    }
+    Connect-AzAccount @params -ErrorAction Stop | Out-Null
+}
+
 function Connect-NeologikAzure {
     # Signs in to Azure, to read and write role assignments. Returns $true. Returns
     # $false after the function prints what to do. With -UseAzureCliToken the Azure CLI
-    # session gives the token for Azure Resource Manager. The same Azure CLI session
-    # signed in to Microsoft Graph. Without -UseAzureCliToken the function uses the
-    # device code prompt. The device code prompt requests the multi-factor
-    # authentication claim that a role assignment needs.
+    # session gives the token for Azure Resource Manager and the token for Microsoft
+    # Graph. Without -UseAzureCliToken the function uses the device code prompt. The
+    # device code prompt requests the multi-factor authentication claim that a role
+    # assignment needs, and its refresh token gives the token for Microsoft Graph.
+    # Every Azure session receives both tokens: see Connect-NeologikAzureSession.
     $state = $script:State
     if ($state.UseAzureCliToken) {
         Write-Log 'The script signs in to Azure with the token of the Azure CLI session' -Level Info
@@ -2880,8 +2944,14 @@ function Connect-NeologikAzure {
         }
         $accountId = Get-NeologikTokenAccountId -Token $cliToken.Trim()
         if (-not $accountId) { $accountId = 'azure-cli' }
+        $graphToken = Get-NeologikAzureCliGraphToken
+        if (-not $graphToken) {
+            Write-Log 'The sign-in to Azure failed. The Azure CLI gave no token for Microsoft Graph, which the Azure session needs for each role assignment' -Level Error
+            Write-ActionRequired "The Azure CLI gave no token for Microsoft Graph in tenant $($state.TenantId).`nSign in with this command:`n  az login --tenant $($state.TenantId)`nThen run the script again. Or run the script without -UseAzureCliToken, to sign in with a device code."
+            return $false
+        }
         try {
-            Connect-AzAccount -AccessToken $cliToken.Trim() -AccountId $accountId -Tenant $state.TenantId -Subscription $state.SubscriptionId -ErrorAction Stop | Out-Null
+            Connect-NeologikAzureSession -AccessToken $cliToken.Trim() -GraphToken $graphToken -AccountId $accountId
         }
         catch {
             Write-Log "The sign-in to Azure failed. $(Get-NeologikErrorText $_)" -Level Error
@@ -2900,11 +2970,20 @@ function Connect-NeologikAzure {
             -Scopes @('https://management.azure.com/.default', 'openid', 'profile', 'offline_access')
         if ($token) {
             $accountId = if ($token.Account) { $token.Account } else { 'device-code' }
-            try {
-                Connect-AzAccount -AccessToken $token.AccessToken -AccountId $accountId -Tenant $state.TenantId -Subscription $state.SubscriptionId -ErrorAction Stop | Out-Null
-                $connected = $true
+            # The same sign-in gives the token for Microsoft Graph that the Azure session needs,
+            # through its refresh token. The administrator signs in once.
+            $graphToken = Get-NeologikRefreshedToken -ClientId $script:AzurePublicClientId -RefreshToken $token.RefreshToken `
+                -Scopes @('https://graph.microsoft.com/.default') -Label 'Microsoft Graph for the Azure session'
+            if (-not $graphToken) {
+                Write-Log 'The sign-in gave no token for Microsoft Graph for the Azure session. The script tries the next method' -Level Warning
             }
-            catch { Write-Log "The script could not open the Azure session with the token of the sign-in. $(Get-NeologikErrorText $_)" -Level Warning }
+            else {
+                try {
+                    Connect-NeologikAzureSession -AccessToken $token.AccessToken -GraphToken $graphToken -AccountId $accountId
+                    $connected = $true
+                }
+                catch { Write-Log "The script could not open the Azure session with the token of the sign-in. $(Get-NeologikErrorText $_)" -Level Warning }
+            }
         }
         if (-not $connected -and (Test-NeologikCommand -Name 'az')) {
             Write-Log 'The script now tries the Azure CLI session of this workstation' -Level Info
@@ -2914,12 +2993,18 @@ function Connect-NeologikAzure {
             if ($cliToken.Trim()) {
                 $accountId = Get-NeologikTokenAccountId -Token $cliToken.Trim()
                 if (-not $accountId) { $accountId = 'azure-cli' }
-                try {
-                    Connect-AzAccount -AccessToken $cliToken.Trim() -AccountId $accountId -Tenant $state.TenantId -Subscription $state.SubscriptionId -ErrorAction Stop | Out-Null
-                    $connected = $true
-                    Write-Log '  The token of the Azure CLI session holds no multi-factor authentication claim. When Azure refuses a role assignment with a claims error, run the script again and complete the sign-in with the device code' -Level Info
+                $graphToken = Get-NeologikAzureCliGraphToken
+                if (-not $graphToken) {
+                    Write-Log '  The Azure CLI gave no token for Microsoft Graph, which the Azure session needs for each role assignment. The script tries the next method' -Level Info
                 }
-                catch { Write-Log "The script could not open the Azure session with the token of the Azure CLI session. $(Get-NeologikErrorText $_)" -Level Warning }
+                else {
+                    try {
+                        Connect-NeologikAzureSession -AccessToken $cliToken.Trim() -GraphToken $graphToken -AccountId $accountId
+                        $connected = $true
+                        Write-Log '  The token of the Azure CLI session holds no multi-factor authentication claim. When Azure refuses a role assignment with a claims error, run the script again and complete the sign-in with the device code' -Level Info
+                    }
+                    catch { Write-Log "The script could not open the Azure session with the token of the Azure CLI session. $(Get-NeologikErrorText $_)" -Level Warning }
+                }
             }
             else { Write-Log '  The Azure CLI has no session for this subscription' -Level Info }
         }

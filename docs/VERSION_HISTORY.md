@@ -13,13 +13,22 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 1.0.0](#version-100)
+2. [Version 1.0.1](#version-101)
+3. [Version 1.0.0](#version-100)
 
 ## Scripts in this version
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.0.0 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+| `Migrate-NeologikEnvironment.ps1` | 1.0.1 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+
+## Version 1.0.1
+
+**Date**: 2026-10-08
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | The Azure session receives a token for Microsoft Graph as well as the token for Azure Resource Manager, from the same sign-in. Before this version, every read and every write of an Azure role failed after the device code sign-in with `Authentication failed against resource MicrosoftGraphEndpointResourceId`, because the Azure session could not obtain that token itself. The administrator signs in once, as before |
 
 ## Version 1.0.0
 
