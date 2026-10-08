@@ -615,6 +615,10 @@ $script:UploadedFiles = @()
 # The upload retries while the role Storage Blob Data Contributor propagates.
 $script:UploadMaxAttempts = 12
 $script:UploadRetryDelay = 20
+$script:StorageBlobEndpointSuffix = 'blob.core.windows.net'
+# The token for Azure Storage of the run, obtained once at the upload. See Get-NeologikStorageToken.
+$script:StorageToken = ''
+$script:StorageTokenResolved = $false
 
 # ----- Console, log file and summary ---------------------------------------------
 
@@ -3225,6 +3229,26 @@ function Connect-NeologikAzureSession {
     Connect-AzAccount @params -ErrorAction Stop | Out-Null
 }
 
+function Initialize-NeologikAzureContext {
+    <#
+    Gives the run an Az context store of its own, empty. Az PowerShell saves its
+    contexts per user on the workstation and consults them when a session opens, so
+    an account saved by an earlier sign-in can take the place of the tokens the
+    script supplies. Its silent token refresh then fails under Conditional Access
+    with "User interaction is required", for every Azure call of the run. The saved
+    contexts on the workstation are not changed: the autosave is switched off for
+    this process only, and the process copy is cleared.
+    #>
+    try {
+        Disable-AzContextAutosave -Scope Process -ErrorAction Stop | Out-Null
+        Clear-AzContext -Scope Process -Force -ErrorAction Stop | Out-Null
+        Write-Log '  The run uses an Az session of its own. Sign-ins saved on this workstation take no part' -Level Info
+    }
+    catch {
+        Write-Log "The script could not give the run an Az session of its own. $(Get-NeologikErrorText $_). A sign-in saved on this workstation may take the place of the tokens of the run" -Level Warning
+    }
+}
+
 function Connect-NeologikAzure {
     # Signs in to Azure, to read and write role assignments. Returns $true. Returns
     # $false after the function prints what to do. With -UseAzureCliToken the Azure CLI
@@ -3232,8 +3256,10 @@ function Connect-NeologikAzure {
     # Graph. Without -UseAzureCliToken the function uses the browser sign-in, then the
     # device code. Each method requests the multi-factor authentication claim that a
     # role assignment needs, and its refresh token gives the token for Microsoft Graph.
-    # Every Azure session receives both tokens: see Connect-NeologikAzureSession.
+    # Every Azure session receives both tokens: see Connect-NeologikAzureSession. The
+    # session is opened in a context store of the run's own: see Initialize-NeologikAzureContext.
     $state = $script:State
+    Initialize-NeologikAzureContext
     if ($state.UseAzureCliToken) {
         Write-Log 'The script signs in to Azure with the token of the Azure CLI session' -Level Info
         # The command gives --subscription only. az finds the account and the tenant from the
@@ -3256,6 +3282,7 @@ function Connect-NeologikAzure {
         }
         try {
             Connect-NeologikAzureSession -AccessToken $cliToken.Trim() -GraphToken $graphToken -AccountId $accountId
+            $state.AzureTokenSource = 'azure-cli'
         }
         catch {
             Write-Log "The sign-in to Azure failed. $(Get-NeologikErrorText $_)" -Level Error
@@ -3286,9 +3313,13 @@ function Connect-NeologikAzure {
                 Write-Log 'The sign-in gave no token for Microsoft Graph for the Azure session. The script tries the next method' -Level Warning
             }
             else {
+                Write-Log '  The sign-in also gave the token for Microsoft Graph that the Azure session needs' -Level Info
                 try {
                     Connect-NeologikAzureSession -AccessToken $token.AccessToken -GraphToken $graphToken -AccountId $accountId
                     $connected = $true
+                    # The upload obtains its token for Azure Storage from the same sign-in: see Get-NeologikStorageToken.
+                    $state.AzureTokenSource = 'device-code'
+                    $state.AzureRefreshToken = $token.RefreshToken
                 }
                 catch { Write-Log "The script could not open the Azure session with the token of the sign-in. $(Get-NeologikErrorText $_)" -Level Warning }
             }
@@ -3309,6 +3340,7 @@ function Connect-NeologikAzure {
                     try {
                         Connect-NeologikAzureSession -AccessToken $cliToken.Trim() -GraphToken $graphToken -AccountId $accountId
                         $connected = $true
+                        $state.AzureTokenSource = 'azure-cli'
                         Write-Log '  The token of the Azure CLI session holds no multi-factor authentication claim. When Azure refuses a role assignment with a claims error, run the script again and complete the sign-in in the browser' -Level Info
                     }
                     catch { Write-Log "The script could not open the Azure session with the token of the Azure CLI session. $(Get-NeologikErrorText $_)" -Level Warning }
@@ -3328,6 +3360,8 @@ function Connect-NeologikAzure {
                 }
                 $InformationPreference = 'Continue'
                 Connect-AzAccount @connectParams -ErrorAction Stop | Out-Null
+                # Az PowerShell holds this sign-in itself and obtains the token for Azure Storage on its own.
+                $state.AzureTokenSource = 'az-powershell'
             }
             catch {
                 Write-Log "The sign-in to Azure failed. $(Get-NeologikErrorText $_)" -Level Error
@@ -4114,6 +4148,69 @@ function Get-NeologikUploadTarget {
     return $targets
 }
 
+function Get-NeologikStorageToken {
+    <#
+    The token for Azure Storage from the same sign-in as the Azure session, for the
+    upload of the files of the run. An Az session opened from access tokens holds
+    the tokens it was given and none for Azure Storage, so the script obtains that
+    token itself: with the refresh token of the device code sign-in, or from the
+    Azure CLI. Returns '' when Az PowerShell holds the sign-in itself, which obtains
+    the token on its own, and when no token can be obtained. The token is obtained
+    once per run.
+    #>
+    if ($script:StorageTokenResolved) { return $script:StorageToken }
+    $script:StorageTokenResolved = $true
+    $script:StorageToken = ''
+    $state = $script:State
+    $source = [string](Get-NeologikProperty $state 'AzureTokenSource' '')
+    if ($source -eq 'device-code') {
+        $script:StorageToken = Get-NeologikRefreshedToken -ClientId $script:AzurePublicClientId -RefreshToken ([string](Get-NeologikProperty $state 'AzureRefreshToken' '')) `
+            -Scopes @('https://storage.azure.com/.default') -Label 'Azure Storage'
+    }
+    elseif ($source -eq 'azure-cli') {
+        $cli = Invoke-NeologikAzureCli -Arguments @('account', 'get-access-token', '--resource', 'https://storage.azure.com/',
+            '--subscription', $state.SubscriptionId, '--query', 'accessToken', '-o', 'tsv')
+        if ($cli.ExitCode -eq 0) { $script:StorageToken = ([string](@($cli.Output) | Where-Object { $_ -and $_.Trim() } | Select-Object -Last 1)).Trim() }
+        if (-not $script:StorageToken) { Write-Log '  The Azure CLI gave no token for Azure Storage. The upload uses the Azure session' -Level Warning }
+    }
+    if ($script:StorageToken) { Write-Log '  The sign-in also gave the token for Azure Storage that the upload needs' -Level Info }
+    return $script:StorageToken
+}
+
+function Invoke-NeologikBlobRequest {
+    # One request to the blob service of a storage account, with the token for Azure
+    # Storage. Returns the HTTP status code. Throws when no answer arrives, as for a
+    # storage account behind a private endpoint.
+    param([string]$Method, [string]$Uri, [string]$Token, [string]$InFile)
+    $headers = @{ Authorization = "Bearer $Token"; 'x-ms-version' = '2021-08-06' }
+    $params = @{ Method = $Method; Uri = $Uri; Headers = $headers; SkipHttpErrorCheck = $true; TimeoutSec = 120; ErrorAction = 'Stop' }
+    if ($InFile) {
+        $headers['x-ms-blob-type'] = 'BlockBlob'
+        $params['InFile'] = $InFile
+        $params['ContentType'] = 'application/octet-stream'
+    }
+    $response = Invoke-WebRequest @params
+    return [int]$response.StatusCode
+}
+
+function Send-NeologikBlobWithToken {
+    # Puts one file into one container of one storage account with the token for Azure
+    # Storage, creating the container when it is absent. Throws with the status code
+    # when the storage account refuses, so that the caller treats HTTP 403 as a missing
+    # data role.
+    param([string]$Account, [string]$Container, [string]$Blob, [string]$File, [string]$Token)
+    $base = "https://$Account.$($script:StorageBlobEndpointSuffix)"
+    $containerUri = "$base/$Container`?restype=container"
+    $status = Invoke-NeologikBlobRequest -Method 'GET' -Uri $containerUri -Token $Token
+    if ($status -eq 404) {
+        $status = Invoke-NeologikBlobRequest -Method 'PUT' -Uri $containerUri -Token $Token
+        if ($status -ne 201 -and $status -ne 409) { throw "The storage account $Account answered HTTP $status to the creation of the container $Container" }
+    }
+    elseif ($status -ne 200) { throw "The storage account $Account answered HTTP $status to the read of the container $Container" }
+    $status = Invoke-NeologikBlobRequest -Method 'PUT' -Uri "$base/$Container/$Blob" -Token $Token -InFile $File
+    if ($status -ne 201) { throw "The storage account $Account answered HTTP $status to the upload of $Blob" }
+}
+
 function Send-NeologikRunFileTo {
     # Uploads the files of the run to one storage account. Returns $true when every
     # file is there. The storage accounts of the Neologik Platform refuse shared keys,
@@ -4125,19 +4222,28 @@ function Send-NeologikRunFileTo {
     $account = $Target.Account
     $scope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)/providers/Microsoft.Storage/storageAccounts/$account"
     $uploaded = @()
+    # With a token for Azure Storage from the sign-in, the upload goes to the blob service
+    # directly. Without one, the Azure session of Az PowerShell provides the token.
+    $storageToken = Get-NeologikStorageToken
     try {
-        $context = New-AzStorageContext -StorageAccountName $account -UseConnectedAccount -ErrorAction Stop
+        $context = $null
+        if (-not $storageToken) { $context = New-AzStorageContext -StorageAccountName $account -UseConnectedAccount -ErrorAction Stop }
         $roleAssigned = $false
         for ($attempt = 1; $attempt -le $script:UploadMaxAttempts; $attempt++) {
             try {
                 $uploaded = @()
                 foreach ($file in $Files) {
                     $container = if ($file -like '*.log') { $Target.LogContainer } else { $Target.FileContainer }
-                    if (-not (Get-AzStorageContainer -Name $container -Context $context -ErrorAction SilentlyContinue)) {
-                        New-AzStorageContainer -Name $container -Context $context -Permission Off -ErrorAction Stop | Out-Null
-                    }
                     $blob = Split-Path -Leaf $file
-                    Set-AzStorageBlobContent -File $file -Container $container -Blob $blob -Context $context -Force -ErrorAction Stop | Out-Null
+                    if ($storageToken) {
+                        Send-NeologikBlobWithToken -Account $account -Container $container -Blob $blob -File $file -Token $storageToken
+                    }
+                    else {
+                        if (-not (Get-AzStorageContainer -Name $container -Context $context -ErrorAction SilentlyContinue)) {
+                            New-AzStorageContainer -Name $container -Context $context -Permission Off -ErrorAction Stop | Out-Null
+                        }
+                        Set-AzStorageBlobContent -File $file -Container $container -Blob $blob -Context $context -Force -ErrorAction Stop | Out-Null
+                    }
                     $uploaded += "$account/$container/$blob"
                 }
                 $script:UploadedFiles = $uploaded
@@ -4384,6 +4490,8 @@ function Invoke-NeologikEnvironmentMigration {
     $ErrorActionPreference = 'Stop'
     $script:Summary = @()
     $script:State = @{}
+    $script:StorageToken = ''
+    $script:StorageTokenResolved = $false
     $script:ExitReason = ''
     $script:SummaryFile = $null
     $script:SnapshotFile = $null

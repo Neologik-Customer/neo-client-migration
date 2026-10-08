@@ -42,6 +42,8 @@ BeforeAll {
     function Get-AzSqlServerActiveDirectoryAdministrator { [CmdletBinding()] param($ResourceGroupName, $ServerName) }
     function Connect-AzAccount { [CmdletBinding()] param($Tenant, $Subscription, $UseDeviceAuthentication, $ClaimsChallenge, $AccessToken, $AccountId, $MicrosoftGraphAccessToken) }
     function Get-AzContext { [CmdletBinding()] param() }
+    function Disable-AzContextAutosave { [CmdletBinding()] param($Scope) }
+    function Clear-AzContext { [CmdletBinding()] param($Scope, [switch]$Force) }
     function Get-AzResourceGroup { [CmdletBinding()] param($Name) }
     function Update-AzTag { [CmdletBinding()] param($ResourceId, $Tag, $Operation) }
     function Get-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
@@ -714,6 +716,24 @@ BeforeAll {
         if ($script:UploadRefusals -gt 0) { $script:UploadRefusals--; throw 'AuthorizationPermissionMismatch: This request is not authorized to perform this operation using this permission.' }
         $script:Uploads += "$Container/$Blob"
     }
+    # The blob service, for the upload with the token for Azure Storage: the same containers,
+    # refusals and unreachable accounts as the Az.Storage mocks above.
+    Mock Invoke-NeologikBlobRequest {
+        param($Method, $Uri, $Token, $InFile)
+        $script:BlobRequests += @{ Method = $Method; Uri = $Uri; Token = $Token; InFile = $InFile }
+        if ($Uri -notmatch '^https://([^.]+)\.blob\.core\.windows\.net/([^/?]+)(?:/([^?]+))?(\?restype=container)?$') { throw "unexpected blob uri $Uri" }
+        $account = $Matches[1]; $container = $Matches[2]; $blob = $Matches[3]
+        if ($script:UnreachableAccounts -contains $account) { throw "Name or service not known: $account.blob.core.windows.net" }
+        if ($Uri -like '*restype=container') {
+            if ($Method -eq 'GET') { if ($script:StorageContainers -contains $container) { return 200 } else { return 404 } }
+            $script:StorageContainers += $container
+            Add-Write "NEW container $container"
+            return 201
+        }
+        if ($script:UploadRefusals -gt 0) { $script:UploadRefusals--; return 403 }
+        $script:Uploads += "$container/$blob"
+        return 201
+    }
     Mock Invoke-NeologikGraphRaw { param($Method, $Uri, $Body) Invoke-FakeGraph -Method $Method -Uri $Uri -Body $Body }
     Mock Connect-MgGraph { $script:Connected = $true }
     Mock Get-MgContext { [pscustomobject]@{ TenantId = $script:ContextTenant; Account = 'admin@contoso.com'; Scopes = @($script:ContextScopes) } }
@@ -810,6 +830,8 @@ BeforeAll {
         [pscustomobject]@{ ObjectId = $server.AdminObjectId; DisplayName = $server.AdminDisplayName; ResourceGroupName = $ResourceGroupName; ServerName = $ServerName }
     }
     Mock Connect-AzAccount { $script:AzConnected = $true }
+    Mock Disable-AzContextAutosave { $script:AzIsolated = @($script:AzIsolated) + 'autosave off' }
+    Mock Clear-AzContext { $script:AzIsolated = @($script:AzIsolated) + 'cleared' }
     Mock Get-AzContext { [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = $script:AzContextSubscription } } }
     Mock Get-AzResourceGroup {
         param($Name)
@@ -881,6 +903,7 @@ BeforeEach {
     $script:UnreachableAccounts = @()
     $script:Uploads = @()
     $script:UploadRefusals = 0
+    $script:BlobRequests = @()
     # NeologikGuestUsers.txt as the onboarding kit ships it: one Neologik support account.
     $script:GuestFile = Join-Path $TestDrive 'NeologikGuestUsers.txt'
     Set-Content -LiteralPath $script:GuestFile -Value "# Neologik support accounts`nsupport@neologik.ai`n" -Encoding UTF8
@@ -1210,6 +1233,20 @@ Context 'Sign-in and preflight' {
         $refresh.Body.scope | Should -Match 'https://graph.microsoft.com/.default'
         Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $MicrosoftGraphAccessToken -eq 'eyJ0b2tlbg' }
         $console | Should -Not -Match 'eyJ0b2tlbg'
+        $console | Should -Match 'The sign-in also gave the token for Microsoft Graph'
+    }
+
+    It 'gives the run an Az context store of its own before the sign-in, so a saved sign-in takes no part' {
+        Add-CompliantPreWindowState
+        $script:AzIsolated = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        # Autosave off for this process, then the process copy cleared, both before Connect-AzAccount.
+        Should -Invoke Disable-AzContextAutosave -Times 1 -Exactly -ParameterFilter { $Scope -eq 'Process' }
+        Should -Invoke Clear-AzContext -Times 1 -Exactly -ParameterFilter { $Scope -eq 'Process' -and $Force }
+        $script:AzIsolated | Should -Be @('autosave off', 'cleared')
+        ($script:Console -join "`n") | Should -Match 'The run uses an Az session of its own'
+        Should -Invoke Connect-AzAccount -Times 1
     }
 
     It 'keeps waiting while the sign-in is pending, reports every 30 seconds and gives up when the code expires' {
@@ -3097,6 +3134,25 @@ Context 'Snapshot, upload and the file list (project#3171)' {
         $text | Should -Match 'sttemplateabcprd01/onboarding-access/NeologikEnvironmentMigration_'
     }
 
+    It 'uploads with a token for Azure Storage from the same sign-in, so the session opened from access tokens needs none of its own' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UploadStorageAccountName = 'sttemplateabcprd01' }
+        $code | Should -Be 0
+        # One refresh token exchange for the storage scope, with the client of the Azure sign-in.
+        $refresh = @($script:TokenRequests | Where-Object { $_.Uri -match '/token$' -and $_.Body.grant_type -eq 'refresh_token' -and $_.Body.scope -match 'storage\.azure\.com' })
+        $refresh | Should -HaveCount 1
+        $refresh[0].Body.client_id | Should -Be '1950a258-227b-4e31-a9cf-717495945fc2'
+        $refresh[0].Body.refresh_token | Should -Be 'rt-1'
+        # Three blobs put with that token, the container created first; Az.Storage not used.
+        @($script:BlobRequests | Where-Object { $_.Method -eq 'PUT' -and $_.Uri -notlike '*restype=container' -and $_.InFile }) | Should -HaveCount 3
+        @($script:BlobRequests | Where-Object { $_.Token -ne 'eyJ0b2tlbg' }) | Should -HaveCount 0
+        $script:Uploads | Should -HaveCount 3
+        Should -Invoke New-AzStorageContext -Times 0
+        Should -Invoke Set-AzStorageBlobContent -Times 0
+        ($script:Console -join "`n") | Should -Match 'The sign-in also gave the token for Azure Storage'
+        ($script:Console -join "`n") | Should -Not -Match 'eyJ0b2tlbg'
+    }
+
     It 'assigns Storage Blob Data Contributor to the administrator and retries when the upload is refused' {
         Add-CompliantPreWindowState
         $script:UploadRefusals = 1
@@ -3148,7 +3204,8 @@ Context 'Snapshot, upload and the file list (project#3171)' {
 
     It 'leaves the files listed when the storage account cannot be reached, without changing the exit code' {
         Add-CompliantPreWindowState
-        Mock New-AzStorageContext { throw 'Name or service not known: sttemplateabcprd01.blob.core.windows.net' }
+        # The blob service of the storage account does not answer, as behind a private endpoint.
+        $script:UnreachableAccounts = @('sttemplateabcprd01')
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UploadStorageAccountName = 'sttemplateabcprd01' }
         $code | Should -Be 0
         $script:Uploads | Should -HaveCount 0

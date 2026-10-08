@@ -14,8 +14,10 @@ This document lists the versions of the Neologik migration package. For each ver
 
 1. [Scripts in this version](#scripts-in-this-version)
 2. [Version 1.1.0](#version-110)
-3. [Version 1.0.1](#version-101)
-4. [Version 1.0.0](#version-100)
+3. [Version 1.0.3](#version-103)
+4. [Version 1.0.2](#version-102)
+5. [Version 1.0.1](#version-101)
+6. [Version 1.0.0](#version-100)
 
 ## Scripts in this version
 
@@ -33,6 +35,22 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Migrate-NeologikEnvironment.ps1` | When a Conditional Access policy refuses a sign-in, the migration script says so and tries the next method at once |
 | `Migrate-NeologikEnvironment.ps1` | Step 5 and step 6 apply a three-role condition to the limited Role Based Access Control Administrator on the subscription: Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The deployment assigns Cost Management Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster to the identity of the configuration API of the Neologik Platform, which reads the daily cost of the nodes for the return on investment report. An assignment with the old condition receives the new condition in the later run |
 | `MIGRATION-SCRIPT-GUIDE.md` | The document describes the browser sign-in, the device code as the second method and the three roles the limited administrator may assign. The sign-in step says to choose the account that holds Owner or User Access Administrator on the subscription as well as Global Administrator |
+
+## Version 1.0.3
+
+**Date**: 2026-10-08
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | The upload of the files of the run uses a token for Azure Storage from the same sign-in as the Azure session, and puts the files into the storage account directly. Before this version, the upload asked the Azure session for that token, which a session opened from the sign-in of the script does not hold, and the upload failed with `failed to retrieve access token for resource 'StorageOAuthEndpointResourceId'`. The administrator then sent the files by hand. The sign-in with the device code of Az PowerShell is unchanged |
+
+## Version 1.0.2
+
+**Date**: 2026-10-08
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | The run opens its Azure session in a context store of its own, empty, so a sign-in saved on the workstation by an earlier script takes no part. Before this version, Az PowerShell could use such a saved sign-in in place of the tokens of the run, and every Azure call then failed with `User interaction is required`. The saved sign-ins on the workstation are not changed. The log says when the sign-in also gave the token for Microsoft Graph |
 
 ## Version 1.0.1
 
