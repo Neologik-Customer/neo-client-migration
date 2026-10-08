@@ -13,14 +13,23 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 1.0.1](#version-101)
-3. [Version 1.0.0](#version-100)
+2. [Version 1.0.2](#version-102)
+3. [Version 1.0.1](#version-101)
+4. [Version 1.0.0](#version-100)
 
 ## Scripts in this version
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.0.1 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+| `Migrate-NeologikEnvironment.ps1` | 1.0.2 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+
+## Version 1.0.2
+
+**Date**: 2026-10-08
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | The run opens its Azure session in a context store of its own, empty, so a sign-in saved on the workstation by an earlier script takes no part. Before this version, Az PowerShell could use such a saved sign-in in place of the tokens of the run, and every Azure call then failed with `User interaction is required`. The saved sign-ins on the workstation are not changed. The log says when the sign-in also gave the token for Microsoft Graph |
 
 ## Version 1.0.1
 

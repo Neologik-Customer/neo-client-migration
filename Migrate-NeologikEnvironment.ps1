@@ -577,7 +577,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.0.1'
+$script:ScriptVersion = '1.0.2'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -2921,6 +2921,26 @@ function Connect-NeologikAzureSession {
     Connect-AzAccount @params -ErrorAction Stop | Out-Null
 }
 
+function Initialize-NeologikAzureContext {
+    <#
+    Gives the run an Az context store of its own, empty. Az PowerShell saves its
+    contexts per user on the workstation and consults them when a session opens, so
+    an account saved by an earlier sign-in can take the place of the tokens the
+    script supplies. Its silent token refresh then fails under Conditional Access
+    with "User interaction is required", for every Azure call of the run. The saved
+    contexts on the workstation are not changed: the autosave is switched off for
+    this process only, and the process copy is cleared.
+    #>
+    try {
+        Disable-AzContextAutosave -Scope Process -ErrorAction Stop | Out-Null
+        Clear-AzContext -Scope Process -Force -ErrorAction Stop | Out-Null
+        Write-Log '  The run uses an Az session of its own. Sign-ins saved on this workstation take no part' -Level Info
+    }
+    catch {
+        Write-Log "The script could not give the run an Az session of its own. $(Get-NeologikErrorText $_). A sign-in saved on this workstation may take the place of the tokens of the run" -Level Warning
+    }
+}
+
 function Connect-NeologikAzure {
     # Signs in to Azure, to read and write role assignments. Returns $true. Returns
     # $false after the function prints what to do. With -UseAzureCliToken the Azure CLI
@@ -2928,8 +2948,10 @@ function Connect-NeologikAzure {
     # Graph. Without -UseAzureCliToken the function uses the device code prompt. The
     # device code prompt requests the multi-factor authentication claim that a role
     # assignment needs, and its refresh token gives the token for Microsoft Graph.
-    # Every Azure session receives both tokens: see Connect-NeologikAzureSession.
+    # Every Azure session receives both tokens: see Connect-NeologikAzureSession. The
+    # session is opened in a context store of the run's own: see Initialize-NeologikAzureContext.
     $state = $script:State
+    Initialize-NeologikAzureContext
     if ($state.UseAzureCliToken) {
         Write-Log 'The script signs in to Azure with the token of the Azure CLI session' -Level Info
         # The command gives --subscription only. az finds the account and the tenant from the
@@ -2978,6 +3000,7 @@ function Connect-NeologikAzure {
                 Write-Log 'The sign-in gave no token for Microsoft Graph for the Azure session. The script tries the next method' -Level Warning
             }
             else {
+                Write-Log '  The sign-in also gave the token for Microsoft Graph that the Azure session needs' -Level Info
                 try {
                     Connect-NeologikAzureSession -AccessToken $token.AccessToken -GraphToken $graphToken -AccountId $accountId
                     $connected = $true
