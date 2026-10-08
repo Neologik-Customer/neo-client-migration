@@ -1,0 +1,16 @@
+# Files written by Migrate-NeologikEnvironment.ps1
+NeologikEnvironmentMigration_*.log
+Neologik_EnvironmentMigration_*.json
+
+# Configuration file from the onboarding, when a run names one
+Neologik_*_Configuration_*.json
+
+# Test output
+testResults.xml
+
+# Editors and the operating system
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+.DS_Store
