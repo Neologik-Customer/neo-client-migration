@@ -40,7 +40,7 @@ BeforeAll {
     function Remove-MgGroupMemberByRef { [CmdletBinding()] param($GroupId, $DirectoryObjectId) }
     function Get-AzSqlServer { [CmdletBinding()] param($ResourceGroupName) }
     function Get-AzSqlServerActiveDirectoryAdministrator { [CmdletBinding()] param($ResourceGroupName, $ServerName) }
-    function Connect-AzAccount { [CmdletBinding()] param($Tenant, $Subscription, $UseDeviceAuthentication, $ClaimsChallenge, $AccessToken, $AccountId) }
+    function Connect-AzAccount { [CmdletBinding()] param($Tenant, $Subscription, $UseDeviceAuthentication, $ClaimsChallenge, $AccessToken, $AccountId, $MicrosoftGraphAccessToken) }
     function Get-AzContext { [CmdletBinding()] param() }
     function Get-AzResourceGroup { [CmdletBinding()] param($Name) }
     function Update-AzTag { [CmdletBinding()] param($ResourceId, $Tag, $Operation) }
@@ -1118,7 +1118,8 @@ Context 'Modules and sign-in' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UseAzureCliToken = $true }
         $code | Should -Be 0
-        Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match "get-access-token --resource-type ms-graph --tenant $($script:Ids.Tenant)" }
+        # Twice: once for the Microsoft Graph session, once for the Azure session.
+        Should -Invoke Invoke-NeologikAzureCli -Times 2 -Exactly -ParameterFilter { ($Arguments -join ' ') -match "get-access-token --resource-type ms-graph --tenant $($script:Ids.Tenant)" }
         Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] -and -not $UseDeviceCode }
         ($script:Console -join "`n") | Should -Not -Match 'eyJ0b2tlbg'
     }
@@ -1129,6 +1130,8 @@ Context 'Modules and sign-in' {
         $code | Should -Be 0
         Should -Invoke Invoke-NeologikAzureCli -Times 1 -ParameterFilter { ($Arguments -join ' ') -match "get-access-token --resource https://management.azure.com/ --subscription $($script:Ids.Subscription)" }
         Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $AccessToken -eq 'eyJ0b2tlbg' -and $AccountId -and -not $UseDeviceAuthentication }
+        # The Azure session also receives the Microsoft Graph token of the Azure CLI, for the role assignment commands.
+        Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $MicrosoftGraphAccessToken -eq 'eyJ0b2tlbg' }
         ($script:Console -join "`n") | Should -Not -Match 'device code'
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
     }
@@ -1188,6 +1191,14 @@ Context 'Sign-in and preflight' {
         $azureRequest = @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' -and $_.Body.client_id -eq '1950a258-227b-4e31-a9cf-717495945fc2' }) | Select-Object -First 1
         $azureRequest.Body.scope | Should -Match 'https://management.azure.com/.default'
         $azureRequest.Body.claims | Should -Match '"p1"'
+        # The Azure session also receives a Microsoft Graph token from the same sign-in, through
+        # the refresh token, so the role assignment commands of Az can resolve each principal.
+        $refresh = @($script:TokenRequests | Where-Object { $_.Uri -match '/token$' -and $_.Body.grant_type -eq 'refresh_token' }) | Select-Object -First 1
+        $refresh | Should -Not -BeNullOrEmpty
+        $refresh.Body.client_id | Should -Be '1950a258-227b-4e31-a9cf-717495945fc2'
+        $refresh.Body.refresh_token | Should -Be 'rt-1'
+        $refresh.Body.scope | Should -Match 'https://graph.microsoft.com/.default'
+        Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $MicrosoftGraphAccessToken -eq 'eyJ0b2tlbg' }
         $console | Should -Not -Match 'eyJ0b2tlbg'
     }
 
