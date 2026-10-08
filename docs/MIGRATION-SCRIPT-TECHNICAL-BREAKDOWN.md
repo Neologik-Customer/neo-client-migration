@@ -74,8 +74,8 @@ The sign-in requests delegated permissions only. A delegated permission works on
 
 | Subject | Detail |
 |---|---|
-| Method | A sign-in in the browser of the workstation with the public client id of Microsoft Azure PowerShell, naming the account of the Microsoft Graph sign-in. The request carries the multi-factor authentication claim, because Azure requires the claim for a role assignment |
-| Second method | A device code that the migration script requests, with the same claim |
+| Method | A sign-in in the browser of the workstation with the public client id of Microsoft Azure PowerShell, naming the account of the Microsoft Graph sign-in. The request carries the multi-factor authentication claim, because Azure requires the claim for a role assignment. The same sign-in gives the Azure session a token for Microsoft Graph, through the refresh token, because the role assignment commands of Az PowerShell read each principal from Microsoft Graph |
+| Second method | A device code that the migration script requests, with the same claim. The device code gives the Azure session the token for Microsoft Graph in the same way |
 | Third method | The Azure CLI session of the workstation |
 | Fourth method | The device code prompt of Az PowerShell |
 | Check after the sign-in | The session selected the subscription that the command names. The signed-in account holds Owner or User Access Administrator on the subscription. A run that writes stops otherwise |
