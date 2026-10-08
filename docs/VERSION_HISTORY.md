@@ -13,13 +13,25 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 1.0.0](#version-100)
+2. [Version 1.1.0](#version-110)
+3. [Version 1.0.0](#version-100)
 
 ## Scripts in this version
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.0.0 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.0 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+
+## Version 1.1.0
+
+This version is on the line of Neologik Platform v5.1 and is not yet released.
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | The migration script signs in to Microsoft Graph and to Azure in the browser of the workstation first. A device code is the second method. Before this version, a device code was the first method. An organisation that blocks the device code with a Conditional Access policy could not complete the sign-in |
+| `Migrate-NeologikEnvironment.ps1` | When a Conditional Access policy refuses a sign-in, the migration script says so and tries the next method at once |
+| `Migrate-NeologikEnvironment.ps1` | Step 5 and step 6 apply a three-role condition to the limited Role Based Access Control Administrator on the subscription: Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The deployment assigns Cost Management Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster to the identity of the configuration API of the Neologik Platform, which reads the daily cost of the nodes for the return on investment report. An assignment with the old condition receives the new condition in the later run |
+| `MIGRATION-SCRIPT-GUIDE.md` | The document describes the browser sign-in, the device code as the second method and the three roles the limited administrator may assign. The sign-in step says to choose the account that holds Owner or User Access Administrator on the subscription as well as Global Administrator |
 
 ## Version 1.0.0
 

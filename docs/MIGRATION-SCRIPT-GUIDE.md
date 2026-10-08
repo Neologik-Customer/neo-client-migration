@@ -34,6 +34,7 @@ The grants for agents and Apps that work unattended in Microsoft 365 are not par
 | Requirement | Reason |
 |---|---|
 | PowerShell 7.4 or later | The migration script stops on an earlier version |
+| A workstation with a desktop and a browser | The migration script opens the sign-in page in the browser of the workstation. You complete the sign-in in the browser |
 | A Global Administrator account in your tenant | Only a Global Administrator can grant and remove Microsoft Graph application permissions and directory roles |
 | Owner or User Access Administrator on the subscription | The same account changes the Azure role assignments of the deployment identity |
 | The command from Neologik | The command names your tenant, your subscription, your resource group, the application registrations of the environment and the version of the onboarding kit that the migration brings your environment to |
@@ -53,9 +54,11 @@ Each run makes one more check before the run changes an Azure role. The signed-i
 1. Place the migration package in a folder on your workstation. The first run reads `NeologikGuestUsers.txt` from the folder of `Migrate-NeologikEnvironment.ps1`.
 2. Open PowerShell 7 in that folder.
 3. Paste the command from Neologik and press Enter.
-4. The migration script prints a web address and a code. Open the web address in a browser on any device, enter the code and sign in as a Global Administrator who also holds Owner or User Access Administrator on the subscription. The account picker may offer another account that is a Global Administrator but holds no role on the subscription, such as a guest account; the Azure steps are skipped for that account and the run must be repeated. The migration script waits for up to 15 minutes.
-5. The migration script signs in a second time, to Azure, with a second code. Sign in with the same account.
+4. The migration script opens the sign-in page in your browser. Sign in as a Global Administrator who also holds Owner or User Access Administrator on the subscription. The account picker may offer another account that is a Global Administrator but holds no role on the subscription, such as a guest account; the Azure steps are skipped for that account and the run must be repeated. The migration script waits for up to 5 minutes.
+5. The migration script signs in a second time, to Azure. The browser uses the same account and does not usually ask again.
 6. Read the summary table on screen and the list `FILES TO SEND TO NEOLOGIK` under it. Send the files to Neologik, unless the list says that the run uploaded them.
+
+When the browser sign-in does not complete, the migration script prints a web address and a code. Open the web address in a browser on any device, enter the code and sign in. The migration script waits for up to 15 minutes. Some organisations block this sign-in with a Conditional Access policy. The migration script then says so and tries the next method.
 
 The command names the version of the onboarding kit that the migration brings your environment to, with `-KitVersion`. The migration script records that version on your resource group at the end of each run. The Neologik Platform reads the record before an upgrade.
 
@@ -124,9 +127,9 @@ The migration script confirms that the deployment identity holds ten Azure roles
 | Scope | Roles |
 |---|---|
 | Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
-| Subscription | Reader<br>Cost Management Contributor<br>Role Based Access Control Administrator, limited to assigning two roles: Reader and AppGw for Containers Configuration Manager |
+| Subscription | Reader<br>Cost Management Contributor<br>Role Based Access Control Administrator, limited to assigning three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader |
 
-The deployment runs the ingress controller of a secure environment with Application Gateway for Containers. Microsoft requires the identity of that controller to hold two roles. The first is Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The second is AppGw for Containers Configuration Manager on the resource group of the environment. The condition on the role lets the deployment identity assign those two roles and no other role. The deployment identity may already hold Role Based Access Control Administrator on the subscription without the condition. The first run then reports `Already assigned without the limit` and keeps the role, because the first run removes nothing. The later run writes the condition onto that assignment and reports `Limit applied`.
+The deployment runs the ingress controller of a secure environment with Application Gateway for Containers. Microsoft requires the identity of that controller to hold two roles. The first is Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The second is AppGw for Containers Configuration Manager on the resource group of the environment. The third role is Cost Management Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster: the identity of the configuration API of the Neologik Platform holds it and reads the daily cost of the nodes for the return on investment report. The condition on the role lets the deployment identity assign those three roles and no other role. The deployment identity may already hold Role Based Access Control Administrator on the subscription without the condition. The first run then reports `Already assigned without the limit` and keeps the role, because the first run removes nothing. The later run writes the condition onto that assignment and reports `Limit applied`.
 
 When the deployment identity holds all ten roles, the migration script records the version of the onboarding kit that the command names on the resource group. The record is the tag `NeologikOnboardingKit`. The migration script keeps your other tags and writes the tag only when the value differs. The Neologik Platform reads the tag before an upgrade.
 
