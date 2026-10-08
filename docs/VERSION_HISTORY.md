@@ -13,16 +13,26 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 1.0.3](#version-103)
-3. [Version 1.0.2](#version-102)
-4. [Version 1.0.1](#version-101)
-5. [Version 1.0.0](#version-100)
+2. [Version 1.0.4](#version-104)
+3. [Version 1.0.3](#version-103)
+4. [Version 1.0.2](#version-102)
+5. [Version 1.0.1](#version-101)
+6. [Version 1.0.0](#version-100)
 
 ## Scripts in this version
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.0.3 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+| `Migrate-NeologikEnvironment.ps1` | 1.0.4 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+
+## Version 1.0.4
+
+**Date**: 2026-10-08
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | New step 5a of the first run: the Azure quotas that the migration needs, read with the Azure session and changed never. The App Service Y1 instance quota for the start and stop schedule of the cluster, the vCPU quota of the node pool family and of the region against the growth of the cluster, and the regional Azure OpenAI quota of each model that the Foundry account lacks. A quota that is short reads `SHORT` in the summary and needs attention; a refused read reads `Review` and the run continues |
+| `MIGRATION-SCRIPT-GUIDE.md`, `MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` | Step 5a described |
 
 ## Version 1.0.3
 

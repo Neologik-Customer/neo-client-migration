@@ -104,6 +104,7 @@ The migration script checks each input before the first sign-in: each id is a GU
 | 3 | First | The assignment of the two role groups to the Platform Sign-in application |
 | 4 | First | The administrator consent of the Platform Sign-in application (read only). The SharePoint consent. The ownership and the unique names of the application registrations that the command names |
 | 5 | First | The sign-in to Azure. The ten Azure roles of the deployment identity. The tag `NeologikOnboardingKit` on the resource group |
+| 5a | First | The Azure quotas that the migration needs, in the region of the environment: App Service Y1 instances, the vCPUs of the node pool family and of the region against the growth of the cluster, and the regional Azure OpenAI quota of each model that the Foundry account lacks. Read only |
 | 6 | Later | The two Microsoft Graph application permissions, then the removal of the seven retired ones. The sign-in to Azure. The ten Azure roles. The removal of Contributor and User Access Administrator on the subscription, the directory role Application Administrator, the membership of the Admin User Group, every other Azure role, directory role and group membership. The tag `NeologikOnboardingKit` |
 | Close | Both | The snapshot file, the summary table and the summary file, the upload, the list of files |
 
@@ -141,7 +142,7 @@ The migration script removes no member other than the deployment identity. The m
 | Tag | First and later | `NeologikOnboardingKit` on the resource group, set to the value of `-KitVersion`, merged with the other tags |
 | Role assignment | Both | Storage Blob Data Contributor on one storage account to the signed-in administrator, only when the storage account refuses the upload of the files of the run |
 
-The migration script changes no Azure resource other than the tag and the role assignments. The migration script reads the Microsoft Entra administrator of each SQL server in the resource group and changes nothing on the server.
+The migration script changes no Azure resource other than the tag and the role assignments. The quota step reads the quotas of the subscription (App Service, compute, Azure OpenAI), the node pools of the cluster, the virtual machine sizes of the region and the model deployments of the AI accounts in the resource group, and changes none of them. The migration script reads the Microsoft Entra administrator of each SQL server in the resource group and changes nothing on the server.
 
 ## Files
 

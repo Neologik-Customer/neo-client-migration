@@ -132,6 +132,18 @@ When the deployment identity holds all ten roles, the migration script records t
 
 The first run changes nothing on a managed identity, on a security group or on a user. The first run removes no role, no permission and no membership.
 
+### Step 5a: The Azure quotas that the migration needs
+
+The migration script reads three quotas of your subscription, in the region of the environment, and changes nothing. A quota that is short needs attention before the migration, because the quota comes from Microsoft and takes days.
+
+| Quota | Why the migration needs it | What the summary says |
+|---|---|---|
+| App Service Y1 instances | The schedule that starts and stops the cluster outside working hours runs as a Function App on a consumption plan, one Y1 instance | `Present: <n>`, or `SHORT: 0` with the Azure portal path to request the quota. Without the quota, Neologik runs the cluster without the schedule |
+| vCPUs of the node pool family and of the region | The cluster may grow to the maximum node count of each pool, and the upgrade of the cluster adds one node per pool while it runs | `Present` with the use, the limit and the growth the cluster may need, or `SHORT` |
+| Azure OpenAI model quota | The Neologik Platform uses the models on the Foundry account. A model deployed only on the classic Azure OpenAI account is deployed on the Foundry account before the migration, within the regional quota of the model | `Model deployments on Foundry` lists what the Foundry account holds. One line per model to move: `Fits`, or `SHORT` with the free quota and the capacity the move needs |
+
+A read that Azure refuses reports `Review` with the reason, and the run continues.
+
 ## The later run
 
 The command selects the later run with `-LaterRun`. Neologik asks for the later run once Neologik has deployed and proven the environment. The later run makes none of the checks of the first run.
