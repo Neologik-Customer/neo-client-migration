@@ -73,7 +73,7 @@ The sign-in requests delegated permissions only. A delegated permission works on
 
 | Subject | Detail |
 |---|---|
-| Method | A device code that the migration script requests with the public client id of Microsoft Azure PowerShell. The request carries the multi-factor authentication claim, because Azure requires the claim for a role assignment. The same sign-in gives the Azure session a token for Microsoft Graph, through the refresh token, because the role assignment commands of Az PowerShell read each principal from Microsoft Graph |
+| Method | A device code that the migration script requests with the public client id of Microsoft Azure PowerShell. The request carries the multi-factor authentication claim, because Azure requires the claim for a role assignment. The same sign-in gives the Azure session a token for Microsoft Graph, through the refresh token, because the role assignment commands of Az PowerShell read each principal from Microsoft Graph. The session is opened in an Az context store of the run's own, empty, so a sign-in saved on the workstation by an earlier script takes no part. The saved sign-ins are not changed |
 | Second method | The Azure CLI session of the workstation |
 | Third method | The device code prompt of Az PowerShell |
 | Check after the sign-in | The session selected the subscription that the command names. The signed-in account holds Owner or User Access Administrator on the subscription. A run that writes stops otherwise |

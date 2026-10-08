@@ -42,6 +42,8 @@ BeforeAll {
     function Get-AzSqlServerActiveDirectoryAdministrator { [CmdletBinding()] param($ResourceGroupName, $ServerName) }
     function Connect-AzAccount { [CmdletBinding()] param($Tenant, $Subscription, $UseDeviceAuthentication, $ClaimsChallenge, $AccessToken, $AccountId, $MicrosoftGraphAccessToken) }
     function Get-AzContext { [CmdletBinding()] param() }
+    function Disable-AzContextAutosave { [CmdletBinding()] param($Scope) }
+    function Clear-AzContext { [CmdletBinding()] param($Scope, [switch]$Force) }
     function Get-AzResourceGroup { [CmdletBinding()] param($Name) }
     function Update-AzTag { [CmdletBinding()] param($ResourceId, $Tag, $Operation) }
     function Get-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
@@ -803,6 +805,8 @@ BeforeAll {
         [pscustomobject]@{ ObjectId = $server.AdminObjectId; DisplayName = $server.AdminDisplayName; ResourceGroupName = $ResourceGroupName; ServerName = $ServerName }
     }
     Mock Connect-AzAccount { $script:AzConnected = $true }
+    Mock Disable-AzContextAutosave { $script:AzIsolated = @($script:AzIsolated) + 'autosave off' }
+    Mock Clear-AzContext { $script:AzIsolated = @($script:AzIsolated) + 'cleared' }
     Mock Get-AzContext { [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = $script:AzContextSubscription } } }
     Mock Get-AzResourceGroup {
         param($Name)
@@ -1200,6 +1204,20 @@ Context 'Sign-in and preflight' {
         $refresh.Body.scope | Should -Match 'https://graph.microsoft.com/.default'
         Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $MicrosoftGraphAccessToken -eq 'eyJ0b2tlbg' }
         $console | Should -Not -Match 'eyJ0b2tlbg'
+        $console | Should -Match 'The sign-in also gave the token for Microsoft Graph'
+    }
+
+    It 'gives the run an Az context store of its own before the sign-in, so a saved sign-in takes no part' {
+        Add-CompliantPreWindowState
+        $script:AzIsolated = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        # Autosave off for this process, then the process copy cleared, both before Connect-AzAccount.
+        Should -Invoke Disable-AzContextAutosave -Times 1 -Exactly -ParameterFilter { $Scope -eq 'Process' }
+        Should -Invoke Clear-AzContext -Times 1 -Exactly -ParameterFilter { $Scope -eq 'Process' -and $Force }
+        $script:AzIsolated | Should -Be @('autosave off', 'cleared')
+        ($script:Console -join "`n") | Should -Match 'The run uses an Az session of its own'
+        Should -Invoke Connect-AzAccount -Times 1
     }
 
     It 'keeps waiting while the sign-in is pending, reports every 30 seconds and gives up when the code expires' {
