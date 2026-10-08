@@ -41,6 +41,7 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | Item | Change |
 |---|---|
 | `Migrate-NeologikEnvironment.ps1` | The Azure session receives a token for Microsoft Graph as well as the token for Azure Resource Manager, from the same sign-in. Before this version, every read and every write of an Azure role failed after the device code sign-in with `Authentication failed against resource MicrosoftGraphEndpointResourceId`, because the Azure session could not obtain that token itself. The administrator signs in once, as before |
+| Documents | The preparation steps of `README.md` name the inner folder of a zip downloaded from GitHub, lift the execution policy for the window with `Bypass` in place of `RemoteSigned`, and say what to do when Group Policy enforces the policy |
 
 ## Version 1.0.0
 
