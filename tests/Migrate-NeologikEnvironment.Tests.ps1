@@ -1305,8 +1305,8 @@ Context 'Sign-in and preflight' {
 
 Context 'Blueprint short name' {
     It 'adopts the one blueprint the deployment identity owns under another short name instead of creating a second one' {
-        # The neoprd shape: the principal is named '... - neo-prd', the pipeline
-        # blueprint is '... - neoneoprdsdc01'; the operator passes the pipeline's name.
+        # An environment whose deployment identity is named with one short name while the
+        # agent identity blueprint carries another; the command passes the blueprint's name.
         Add-CompliantPreWindowState
         $deploySp = Get-FakeSp -Id $script:Ids.DeploySpId
         $deploySp.displayName = 'Neologik GitHub Service Connection - x-prd'
