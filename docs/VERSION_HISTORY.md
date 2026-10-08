@@ -46,3 +46,4 @@ This version is on the line of Neologik Platform v5.1 and is not yet released.
 | `Migrate-NeologikEnvironment.ps1` | The sign-in to Microsoft Graph no longer requests `DelegatedPermissionGrant.ReadWrite.All` in any run. The grants script of the onboarding kit requests the permission |
 | `MIGRATION-SCRIPT-GUIDE.md` | New document. What the migration script checks and changes, for the administrator who runs the script |
 | `MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` | New document. Each sign-in, each permission, each write and each file, for approvers |
+| `NeologikGuestUsers.txt` | One Neologik support account that no longer works for Neologik is removed from the list |
