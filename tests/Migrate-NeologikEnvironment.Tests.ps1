@@ -45,6 +45,7 @@ BeforeAll {
     function Disable-AzContextAutosave { [CmdletBinding()] param($Scope) }
     function Clear-AzContext { [CmdletBinding()] param($Scope, [switch]$Force) }
     function Get-AzResourceGroup { [CmdletBinding()] param($Name) }
+    function Invoke-AzRestMethod { [CmdletBinding()] param($Method, $Path, $Uri, $Payload) }
     function Update-AzTag { [CmdletBinding()] param($ResourceId, $Tag, $Operation) }
     function Get-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $Scope) }
     function New-AzRoleAssignment { [CmdletBinding()] param($ObjectId, $RoleDefinitionName, $RoleDefinitionId, $Scope, $Condition, $ConditionVersion) }
@@ -168,6 +169,19 @@ BeforeAll {
             SqlServers            = @()
             # the resource group's tags (the kit version tag lives here).
             ResourceGroupTags     = @{}
+            # The quotas of step 5a, compliant: one Y1 instance, vCPU room for the cluster, every
+            # classic model already on the Foundry account.
+            Quota                 = @{
+                Y1           = 1
+                ComputeUsage = @(@{ Name = 'StandardDasv7Family'; Current = 18; Limit = 350 }, @{ Name = 'cores'; Current = 18; Limit = 50 })
+                Skus         = @(@{ Name = 'standard_d2as_v7'; Family = 'StandardDasv7Family'; Vcpus = 2 })
+                Clusters     = @(@{ Id = "/subscriptions/$($script:Ids.Subscription)/resourceGroups/$script:RgName/providers/Microsoft.ContainerService/managedClusters/aks$script:ShortName"; Name = "aks$script:ShortName"; Pools = @(@{ Name = 'systempool'; VmSize = 'standard_d2as_v7'; Count = 2; MaxCount = 8 }, @{ Name = 'userpool1'; VmSize = 'standard_d2as_v7'; Count = 2; MaxCount = 8 }) })
+                AiAccounts   = @(
+                    @{ Id = "/subscriptions/$($script:Ids.Subscription)/resourceGroups/$script:RgName/providers/Microsoft.CognitiveServices/accounts/oai-$script:ShortName"; Name = "oai-$script:ShortName"; Kind = 'OpenAI'; Deployments = @(@{ Model = 'gpt-5.4-mini'; Sku = 'GlobalStandard'; Capacity = 1000 }, @{ Model = 'text-embedding-3-large'; Sku = 'Standard'; Capacity = 150 }) },
+                    @{ Id = "/subscriptions/$($script:Ids.Subscription)/resourceGroups/$script:RgName/providers/Microsoft.CognitiveServices/accounts/ais-$script:ShortName"; Name = "ais-$script:ShortName"; Kind = 'AIServices'; Deployments = @(@{ Model = 'gpt-5.4-mini'; Sku = 'GlobalStandard'; Capacity = 1000 }, @{ Model = 'text-embedding-3-large'; Sku = 'Standard'; Capacity = 150 }) }
+                )
+                ModelUsage   = @(@{ Name = 'OpenAI.GlobalStandard.gpt-5.4-mini'; Current = 2000; Limit = 3000 }, @{ Name = 'OpenAI.Standard.text-embedding-3-large'; Current = 300; Limit = 350 })
+            }
             # The signed-in administrator: a
             # Global Administrator who owns the subscription.
             MeDirectoryRoles      = @(@{ id = 'role-ga'; displayName = 'Global Administrator'; roleTemplateId = '62e90394-69f5-4237-9190-012177145e10' })
@@ -835,7 +849,25 @@ BeforeAll {
     Mock Get-AzContext { [pscustomobject]@{ Subscription = [pscustomobject]@{ Id = $script:AzContextSubscription } } }
     Mock Get-AzResourceGroup {
         param($Name)
-        [pscustomobject]@{ ResourceGroupName = $Name; ResourceId = $script:RgScope; Tags = $script:Tenant.ResourceGroupTags }
+        [pscustomobject]@{ ResourceGroupName = $Name; ResourceId = $script:RgScope; Location = 'uksouth'; Tags = $script:Tenant.ResourceGroupTags }
+    }
+    # Azure Resource Manager reads of the quota step (5a): routed by path to the quota fixture.
+    Mock Invoke-AzRestMethod {
+        param($Method, $Path)
+        $script:ArmReads += $Path
+        $q = $script:Tenant.Quota
+        $body = $null
+        if ($Path -match 'Microsoft\.Quota/quotas') { $body = @{ value = @(@{ name = 'Y1'; properties = @{ name = @{ value = 'Y1'; localizedValue = 'Y1 VMs' }; limit = @{ value = $q.Y1 } } }) } }
+        elseif ($Path -match "resourceType eq 'Microsoft\.ContainerService/managedClusters'") { $body = @{ value = @($q.Clusters | ForEach-Object { @{ id = $_.Id; name = $_.Name } }) } }
+        elseif ($Path -match '/agentPools\?') { $cluster = @($q.Clusters | Where-Object { $Path -like "$($_.Id)/*" })[0]; $body = @{ value = @($cluster.Pools | ForEach-Object { @{ name = $_.Name; properties = @{ vmSize = $_.VmSize; count = $_.Count; maxCount = $_.MaxCount } } }) } }
+        elseif ($Path -match 'Microsoft\.Compute/locations/[^/]+/usages') { $body = @{ value = @($q.ComputeUsage | ForEach-Object { @{ name = @{ value = $_.Name; localizedValue = $_.Name }; currentValue = $_.Current; limit = $_.Limit } }) } }
+        elseif ($Path -match 'Microsoft\.Compute/skus') { $body = @{ value = @($q.Skus | ForEach-Object { @{ resourceType = 'virtualMachines'; name = $_.Name; family = $_.Family; capabilities = @(@{ name = 'vCPUs'; value = [string]$_.Vcpus }) } }) } }
+        elseif ($Path -match "resourceType eq 'Microsoft\.CognitiveServices/accounts'") { $body = @{ value = @($q.AiAccounts | ForEach-Object { @{ id = $_.Id; name = $_.Name } }) } }
+        elseif ($Path -match 'Microsoft\.CognitiveServices/accounts/[^/]+/deployments\?') { $account = @($q.AiAccounts | Where-Object { $Path -like "$($_.Id)/deployments*" })[0]; $body = @{ value = @($account.Deployments | ForEach-Object { @{ name = $_.Model; properties = @{ model = @{ name = $_.Model; version = '1' } }; sku = @{ name = $_.Sku; capacity = $_.Capacity } } }) } }
+        elseif ($Path -match 'Microsoft\.CognitiveServices/accounts/[^/?]+\?api-version') { $account = @($q.AiAccounts | Where-Object { $Path -like "$($_.Id)?*" })[0]; $body = @{ id = $account.Id; name = $account.Name; kind = $account.Kind; location = 'uksouth' } }
+        elseif ($Path -match 'Microsoft\.CognitiveServices/locations/[^/]+/usages') { $body = @{ value = @($q.ModelUsage | ForEach-Object { @{ name = @{ value = $_.Name; localizedValue = $_.Name }; currentValue = $_.Current; limit = $_.Limit; unit = 'Count' } }) } }
+        else { return [pscustomobject]@{ StatusCode = 404; Content = '{"error":{"code":"NotFound","message":"no fixture for ' + $Path + '"}}' } }
+        [pscustomobject]@{ StatusCode = 200; Content = ($body | ConvertTo-Json -Depth 10) }
     }
     Mock Update-AzTag {
         param($ResourceId, $Tag, $Operation)
@@ -904,6 +936,7 @@ BeforeEach {
     $script:Uploads = @()
     $script:UploadRefusals = 0
     $script:BlobRequests = @()
+    $script:ArmReads = @()
     # NeologikGuestUsers.txt as the onboarding kit ships it: one Neologik support account.
     $script:GuestFile = Join-Path $TestDrive 'NeologikGuestUsers.txt'
     Set-Content -LiteralPath $script:GuestFile -Value "# Neologik support accounts`nsupport@neologik.ai`n" -Encoding UTF8
@@ -3071,6 +3104,70 @@ Context 'Log file and summary file on every exit (project#3170)' {
         ($script:Console -join "`n") | Should -Match 'could not create the log file'
         ($script:Console -join "`n") | Should -Match 'could not write the summary file to any folder'
         Get-SummaryResult 'Snapshot file' | Should -Match '^SKIPPED'
+    }
+}
+
+Context 'Step 5a: the Azure quotas that the migration needs' {
+    It 'reports the Y1 quota, the vCPU room and no model to move when everything is in place' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Quota: App Service Y1 instances' | Should -Be 'Present: 1 in uksouth'
+        # Each pool may add 6 nodes plus 1 for the upgrade: (6 + 1) * 2 vCPUs * 2 pools = 28.
+        Get-SummaryResult 'Quota: vCPUs of StandardDasv7Family' | Should -Be 'Present: 18 of 350 used in uksouth. The cluster may need 28 more'
+        Get-SummaryResult 'Quota: vCPUs of the region' | Should -Be 'Present: 18 of 50 used in uksouth. The cluster may need 28 more'
+        Get-SummaryResult 'Model deployments on Foundry' | Should -Match '^Present: gpt-5.4-mini \(GlobalStandard 1000\), text-embedding-3-large \(Standard 150\)$'
+        Get-SummaryResult 'Model deployments to move to Foundry' | Should -Be 'None'
+        # Reads only: the quota, the cluster, its pools, the compute usage, the sizes, the accounts, their deployments.
+        @($script:ArmReads | Where-Object { $_ -match 'Microsoft\.Quota/quotas' }) | Should -HaveCount 1
+        @($script:ArmReads | Where-Object { $_ -match '/agentPools\?' }) | Should -HaveCount 1
+        Should -Invoke Invoke-AzRestMethod -Times 0 -ParameterFilter { $Method -ne 'GET' }
+        ($script:Console -join "`n") | Should -Match 'Step 5a of 5: the Azure quotas that the migration needs'
+    }
+
+    It 'reports SHORT and needs attention when the subscription has no Y1 instance' {
+        Add-CompliantPreWindowState
+        $script:Tenant.Quota.Y1 = 0
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult 'Quota: App Service Y1 instances' | Should -Match '^SHORT: 0 in uksouth\. The start and stop schedule of the cluster runs as a Function App and needs one Y1 instance'
+        ($script:Console -join "`n") | Should -Match 'Quota: App Service Y1 instances: 0 in uksouth\. The start and stop schedule of the cluster needs one'
+    }
+
+    It 'reports SHORT when the cluster growth does not fit the regional vCPU quota' {
+        Add-CompliantPreWindowState
+        $script:Tenant.Quota.ComputeUsage = @(@{ Name = 'StandardDasv7Family'; Current = 18; Limit = 350 }, @{ Name = 'cores'; Current = 30; Limit = 50 })
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult 'Quota: vCPUs of the region' | Should -Be 'SHORT: 30 of 50 used in uksouth. The cluster may need 28 more and 20 are free. Ask Microsoft for the quota before the migration'
+        Get-SummaryResult 'Quota: vCPUs of StandardDasv7Family' | Should -Match '^Present'
+    }
+
+    It 'names each model the Foundry account lacks and whether its regional quota fits the move' {
+        Add-CompliantPreWindowState
+        $script:Tenant.Quota.AiAccounts[1].Deployments = @(@{ Model = 'gpt-5.4'; Sku = 'GlobalStandard'; Capacity = 100 })
+        $script:Tenant.Quota.ModelUsage = @(@{ Name = 'OpenAI.GlobalStandard.gpt-5.4-mini'; Current = 2500; Limit = 3000 }, @{ Name = 'OpenAI.Standard.text-embedding-3-large'; Current = 150; Limit = 350 })
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult 'Model deployments on Foundry' | Should -Be 'Present: gpt-5.4 (GlobalStandard 100)'
+        Get-SummaryResult 'Model to move to Foundry: gpt-5.4-mini (GlobalStandard 1000)' | Should -Match "^SHORT: 500 of 3000 free in uksouth and the deployment needs 1000\. Remove the deployment on oai-$script:ShortName first"
+        Get-SummaryResult 'Model to move to Foundry: text-embedding-3-large (Standard 150)' | Should -Be 'Fits: 200 of 350 free in uksouth'
+    }
+
+    It 'reports Review and continues when Azure refuses a quota read' {
+        Add-CompliantPreWindowState
+        Mock Invoke-AzRestMethod { param($Method, $Path) if ($Path -match 'Microsoft\.Quota/quotas') { return [pscustomobject]@{ StatusCode = 403; Content = '{"error":{"code":"AuthorizationFailed","message":"The client does not have authorization"}}' } }; [pscustomobject]@{ StatusCode = 200; Content = '{"value":[]}' } }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Quota: App Service Y1 instances' | Should -Match '^Review: the quota could not be read\. .*HTTP 403\. The client does not have authorization'
+        Get-SummaryResult 'Quota: vCPUs' | Should -Be 'Review: the resource group holds no Kubernetes cluster'
+        Get-SummaryResult 'Model deployments on Foundry' | Should -Match '^Review: the resource group holds no Foundry account'
+    }
+
+    It 'checks no quota in the later run' {
+        Add-CompliantPreWindowState
+        $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        Should -Invoke Invoke-AzRestMethod -Times 0
     }
 }
 
