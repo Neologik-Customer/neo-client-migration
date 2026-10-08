@@ -69,14 +69,16 @@ The migration script installs the PowerShell modules that the run needs, for you
 
 ## Run the migration script
 
-1. Extract the migration package to a folder, for example `C:\Neologik`. Keep the files together: the first run reads `NeologikGuestUsers.txt` from the folder of the migration script.
-2. Open PowerShell 7 in that folder.
+1. Extract the migration package to a folder, for example `C:\Neologik`. A zip downloaded from GitHub extracts to a folder inside the folder you choose, named `neo-client-migration-main`. The script is in that inner folder. Keep the files together: the first run reads `NeologikGuestUsers.txt` from the folder of the migration script.
+2. Open PowerShell 7 and go to the folder that holds the script, for example `cd C:\Neologik\neo-client-migration-main`.
 3. Allow the script to run in this session:
 
 ```powershell
 Get-ChildItem .\*.ps1 | Unblock-File
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
+
+The first command removes the mark that Windows puts on a downloaded file. Without it, PowerShell refuses the script with the words `not digitally signed`. The second command lifts the execution policy for the current PowerShell window only. If PowerShell still refuses a script with the words `not digitally signed`, the execution policy is set by Group Policy, which the command above cannot change. Run `Get-ExecutionPolicy -List`: a value other than `Undefined` on the `MachinePolicy` or `UserPolicy` row confirms it. An administrator of that policy allows `RemoteSigned` for the workstation, or you run the scripts from a workstation without the policy.
 
 4. Paste the command from Neologik and press Enter.
 5. The migration script prints a web address and a code. Open the web address in a browser on any device, enter the code and sign in as a Global Administrator who also holds Owner or User Access Administrator on the subscription. The migration script then signs in to Azure in the same way, with the same account.
