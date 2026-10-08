@@ -550,7 +550,7 @@ $script:OdataHeaders = @{ 'OData-Version' = '4.0' }
 $script:GuidPattern = '^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
 # A summary result that matches this pattern needs attention and sets the exit code
 # to 1. The pattern includes each 'WOULD' change that a run with -Verify reports.
-$script:AttentionPattern = 'MISSING|SKIPPED|NOT FOUND|PENDING|FAILED|UNKNOWN|WOULD'
+$script:AttentionPattern = 'MISSING|SKIPPED|NOT FOUND|PENDING|FAILED|UNKNOWN|WOULD|SHORT'
 
 # Sign-in. The script runs the sign-in itself. The first method is a sign-in in the
 # browser of this computer. The second method is a device code. The script prints what
@@ -4333,6 +4333,236 @@ function Write-NeologikFileList {
 
 # ----- The two runs --------------------------------------------------------------
 
+function Invoke-NeologikArmRead {
+    # One GET to Azure Resource Manager with the Azure session. Returns the parsed body,
+    # or $null for an empty body. Throws with the status code and Azure's message when
+    # Azure refuses, so that the caller reports the reason.
+    param([string]$Path)
+    $response = Invoke-AzRestMethod -Method GET -Path $Path -ErrorAction Stop
+    $status = [int](Get-NeologikProperty $response 'StatusCode' 0)
+    $content = [string](Get-NeologikProperty $response 'Content' '')
+    if ($status -lt 200 -or $status -ge 300) {
+        $message = ''
+        try { $message = [string](Get-NeologikProperty (Get-NeologikProperty ($content | ConvertFrom-Json) 'error') 'message' '') } catch { $message = '' }
+        throw "Azure Resource Manager answered HTTP $status. $message"
+    }
+    if (-not $content) { return $null }
+    return ($content | ConvertFrom-Json)
+}
+
+function Get-NeologikArmList {
+    # The value array of a list answer, as an array.
+    param([string]$Path)
+    $body = Invoke-NeologikArmRead -Path $Path
+    return @(Get-NeologikProperty $body 'value' @())
+}
+
+function Test-NeologikAzureQuota {
+    <#
+    Step 5a of the first run: the quotas of the subscription, in the region of the
+    environment, that the migration needs. The step reads and changes nothing. Each
+    check reports one summary item. A quota that is short reads SHORT and needs
+    attention, so that Neologik and the administrator settle it before the migration:
+    the quota comes from Microsoft and takes days.
+      - App Service Y1 instances: the start and stop schedule of the cluster runs as a
+        Function App on a consumption plan, one Y1 instance.
+      - vCPUs: the cluster may grow to the maximum node count of each pool, and the
+        upgrade of the cluster adds one node per pool while it runs.
+      - Azure OpenAI model quota: the Neologik Platform uses the models on the Foundry
+        account; a model deployed only on the classic Azure OpenAI account must be
+        deployed on the Foundry account first, within the regional quota of the model.
+    A read that Azure refuses reports Review with the reason and does not stop the run.
+    #>
+    Write-Log 'Step 5a of 5: the Azure quotas that the migration needs' -Level Info
+    $state = $script:State
+    $location = ''
+    try { $location = [string](Get-NeologikProperty (Get-AzResourceGroup -Name $state.ResourceGroupName -ErrorAction Stop) 'Location' '') }
+    catch { Write-Log "  The script could not read the resource group. $(Get-NeologikErrorText $_)" -Level Warning }
+    if (-not $location) {
+        Write-Log '  The region of the resource group is not known. The quota checks are skipped' -Level Warning
+        Add-Summary 'Azure quotas' 'Review: the region of the resource group could not be read, so the quotas were not checked'
+        return
+    }
+    Test-NeologikFunctionAppQuota -Location $location
+    Test-NeologikClusterQuota -Location $location
+    Test-NeologikModelQuota -Location $location
+}
+
+function Test-NeologikFunctionAppQuota {
+    # The App Service Y1 (consumption plan) instance quota in the region.
+    param([string]$Location)
+    $label = 'Quota: App Service Y1 instances'
+    try {
+        $quotas = @(Get-NeologikArmList -Path "/subscriptions/$($script:State.SubscriptionId)/providers/Microsoft.Web/locations/$Location/providers/Microsoft.Quota/quotas?api-version=2023-02-01")
+        $y1 = @($quotas | Where-Object { [string](Get-NeologikProperty (Get-NeologikProperty (Get-NeologikProperty $_ 'properties') 'name') 'value' '') -eq 'Y1' }) | Select-Object -First 1
+        if ($null -eq $y1) {
+            Write-Log "  ${label}: no Y1 row in $Location" -Level Warning
+            Add-Summary $label "Review: Azure lists no Y1 quota for $Location"
+            return
+        }
+        $limit = [int](Get-NeologikProperty (Get-NeologikProperty (Get-NeologikProperty $y1 'properties') 'limit') 'value' 0)
+        if ($limit -ge 1) {
+            Write-Log "  ${label}: $limit in $Location" -Level Success
+            Add-Summary $label "Present: $limit in $Location"
+        }
+        else {
+            Write-Log "  ${label}: 0 in $Location. The start and stop schedule of the cluster needs one" -Level Warning
+            Add-Summary $label "SHORT: 0 in $Location. The start and stop schedule of the cluster runs as a Function App and needs one Y1 instance. Ask Microsoft for the quota in the Azure portal, Quotas, App Service, $Location, Y1 VMs, or tell Neologik to run the cluster without the schedule"
+        }
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  ${label}: could not be read. $reason" -Level Warning
+        Add-Summary $label "Review: the quota could not be read. $reason"
+    }
+}
+
+function Test-NeologikClusterQuota {
+    # The vCPU quota of the node pool families and of the region against the growth of
+    # the cluster: each pool up to its maximum node count, plus one node per pool for
+    # the upgrade of the cluster.
+    param([string]$Location)
+    $state = $script:State
+    $sub = $state.SubscriptionId
+    try {
+        $clusters = @(Get-NeologikArmList -Path "/subscriptions/$sub/resourceGroups/$($state.ResourceGroupName)/resources?`$filter=resourceType eq 'Microsoft.ContainerService/managedClusters'&api-version=2021-04-01")
+        if ($clusters.Count -eq 0) {
+            Write-Log '  Quota: vCPUs: the resource group holds no Kubernetes cluster' -Level Warning
+            Add-Summary 'Quota: vCPUs' 'Review: the resource group holds no Kubernetes cluster'
+            return
+        }
+        $cluster = $clusters[0]
+        $pools = @(Get-NeologikArmList -Path "$([string](Get-NeologikProperty $cluster 'id' ''))/agentPools?api-version=2024-09-01")
+        $usages = @(Get-NeologikArmList -Path "/subscriptions/$sub/providers/Microsoft.Compute/locations/$Location/usages?api-version=2024-07-01")
+        $skus = @(Get-NeologikArmList -Path "/subscriptions/$sub/providers/Microsoft.Compute/skus?api-version=2021-07-01&`$filter=location eq '$Location'")
+        $growthByFamily = @{}
+        $totalGrowth = 0
+        foreach ($pool in $pools) {
+            $properties = Get-NeologikProperty $pool 'properties'
+            $size = [string](Get-NeologikProperty $properties 'vmSize' '')
+            $count = [int](Get-NeologikProperty $properties 'count' 0)
+            $maximum = [int](Get-NeologikProperty $properties 'maxCount' $count)
+            if ($maximum -lt $count) { $maximum = $count }
+            $sku = @($skus | Where-Object { [string](Get-NeologikProperty $_ 'resourceType' '') -eq 'virtualMachines' -and [string](Get-NeologikProperty $_ 'name' '') -ieq $size }) | Select-Object -First 1
+            if ($null -eq $sku) { throw "Azure lists no virtual machine size $size in $Location" }
+            $family = [string](Get-NeologikProperty $sku 'family' '')
+            $vcpuCapability = @(@(Get-NeologikProperty $sku 'capabilities' @()) | Where-Object { [string](Get-NeologikProperty $_ 'name' '') -eq 'vCPUs' }) | Select-Object -First 1
+            $vcpu = [int](Get-NeologikProperty $vcpuCapability 'value' 0)
+            # The nodes the pool may add, plus the one node the upgrade adds while it runs.
+            $growth = (($maximum - $count) + 1) * $vcpu
+            if (-not $growthByFamily.ContainsKey($family)) { $growthByFamily[$family] = 0 }
+            $growthByFamily[$family] += $growth
+            $totalGrowth += $growth
+        }
+        foreach ($family in @($growthByFamily.Keys | Sort-Object)) {
+            Write-NeologikVcpuQuotaItem -Label "Quota: vCPUs of $family" -Usages $usages -UsageName $family -Growth $growthByFamily[$family] -Location $Location
+        }
+        Write-NeologikVcpuQuotaItem -Label 'Quota: vCPUs of the region' -Usages $usages -UsageName 'cores' -Growth $totalGrowth -Location $Location
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  Quota: vCPUs: could not be read. $reason" -Level Warning
+        Add-Summary 'Quota: vCPUs' "Review: the quota could not be read. $reason"
+    }
+}
+
+function Write-NeologikVcpuQuotaItem {
+    # One summary item for one vCPU quota row: the usage against the limit and the growth the cluster may need.
+    param([string]$Label, [object[]]$Usages, [string]$UsageName, [int]$Growth, [string]$Location)
+    $row = @($Usages | Where-Object { [string](Get-NeologikProperty (Get-NeologikProperty $_ 'name') 'value' '') -ieq $UsageName }) | Select-Object -First 1
+    if ($null -eq $row) {
+        Write-Log "  ${Label}: no quota row $UsageName in $Location" -Level Warning
+        Add-Summary $Label "Review: Azure lists no quota row $UsageName in $Location"
+        return
+    }
+    $current = [int](Get-NeologikProperty $row 'currentValue' 0)
+    $limit = [int](Get-NeologikProperty $row 'limit' 0)
+    $free = $limit - $current
+    if ($free -ge $Growth) {
+        Write-Log "  ${Label}: $current of $limit used in $Location, the cluster may need $Growth more" -Level Success
+        Add-Summary $Label "Present: $current of $limit used in $Location. The cluster may need $Growth more"
+    }
+    else {
+        Write-Log "  ${Label}: $current of $limit used in $Location, the cluster may need $Growth more and $free are free" -Level Warning
+        Add-Summary $Label "SHORT: $current of $limit used in $Location. The cluster may need $Growth more and $free are free. Ask Microsoft for the quota before the migration"
+    }
+}
+
+function Test-NeologikModelQuota {
+    # The model deployments of the classic Azure OpenAI account that the Foundry account
+    # lacks, against the regional quota of each model.
+    param([string]$Location)
+    $state = $script:State
+    $sub = $state.SubscriptionId
+    try {
+        $accounts = @(Get-NeologikArmList -Path "/subscriptions/$sub/resourceGroups/$($state.ResourceGroupName)/resources?`$filter=resourceType eq 'Microsoft.CognitiveServices/accounts'&api-version=2021-04-01")
+        $foundry = @()
+        $classic = @()
+        foreach ($account in $accounts) {
+            $id = [string](Get-NeologikProperty $account 'id' '')
+            $detail = Invoke-NeologikArmRead -Path "${id}?api-version=2024-10-01"
+            $kind = [string](Get-NeologikProperty $detail 'kind' '')
+            if ($kind -ne 'AIServices' -and $kind -ne 'OpenAI') { continue }
+            $deployments = @(@(Get-NeologikArmList -Path "$id/deployments?api-version=2024-10-01") | ForEach-Object {
+                    $properties = Get-NeologikProperty $_ 'properties'
+                    $sku = Get-NeologikProperty $_ 'sku'
+                    [pscustomobject]@{
+                        Account  = [string](Get-NeologikProperty $account 'name' '')
+                        Name     = [string](Get-NeologikProperty $_ 'name' '')
+                        Model    = [string](Get-NeologikProperty (Get-NeologikProperty $properties 'model') 'name' '')
+                        Sku      = [string](Get-NeologikProperty $sku 'name' '')
+                        Capacity = [int](Get-NeologikProperty $sku 'capacity' 0)
+                    }
+                })
+            if ($kind -eq 'AIServices') { $foundry += $deployments } else { $classic += $deployments }
+        }
+        $foundryNames = @($foundry | ForEach-Object { $_.Account } | Select-Object -Unique)
+        if ($foundryNames.Count -eq 0) {
+            Write-Log '  Model deployments on Foundry: the resource group holds no Foundry account' -Level Warning
+            Add-Summary 'Model deployments on Foundry' 'Review: the resource group holds no Foundry account. The deployment creates one, and the models are deployed on it afterwards'
+        }
+        else {
+            $list = if ($foundry.Count -gt 0) { ($foundry | ForEach-Object { "$($_.Model) ($($_.Sku) $($_.Capacity))" }) -join ', ' } else { 'none' }
+            Write-Log "  Model deployments on Foundry ($($foundryNames -join ', ')): $list" -Level Success
+            Add-Summary 'Model deployments on Foundry' "Present: $list"
+        }
+        $foundryModels = @($foundry | ForEach-Object { $_.Model.ToLowerInvariant() })
+        $toMove = @($classic | Where-Object { $foundryModels -notcontains $_.Model.ToLowerInvariant() })
+        if ($toMove.Count -eq 0) {
+            Write-Log '  Model deployments to move to Foundry: none' -Level Success
+            Add-Summary 'Model deployments to move to Foundry' 'None'
+            return
+        }
+        $usages = @(Get-NeologikArmList -Path "/subscriptions/$sub/providers/Microsoft.CognitiveServices/locations/$Location/usages?api-version=2024-10-01")
+        foreach ($deployment in $toMove) {
+            $label = "Model to move to Foundry: $($deployment.Model) ($($deployment.Sku) $($deployment.Capacity))"
+            $usageName = "OpenAI.$($deployment.Sku).$($deployment.Model)"
+            $row = @($usages | Where-Object { [string](Get-NeologikProperty (Get-NeologikProperty $_ 'name') 'value' '') -ieq $usageName }) | Select-Object -First 1
+            if ($null -eq $row) {
+                Write-Log "  ${label}: no quota row $usageName in $Location" -Level Warning
+                Add-Summary $label "Review: Azure lists no quota row $usageName in $Location"
+                continue
+            }
+            $current = [int](Get-NeologikProperty $row 'currentValue' 0)
+            $limit = [int](Get-NeologikProperty $row 'limit' 0)
+            $free = $limit - $current
+            if ($free -ge $deployment.Capacity) {
+                Write-Log "  ${label}: fits, $free of $limit free in $Location" -Level Success
+                Add-Summary $label "Fits: $free of $limit free in $Location"
+            }
+            else {
+                Write-Log "  ${label}: $free of $limit free in $Location, the deployment needs $($deployment.Capacity)" -Level Warning
+                Add-Summary $label "SHORT: $free of $limit free in $Location and the deployment needs $($deployment.Capacity). Remove the deployment on $($deployment.Account) first, or ask Microsoft for the quota"
+            }
+        }
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  Model deployments to move to Foundry: could not be read. $reason" -Level Warning
+        Add-Summary 'Model deployments to move to Foundry' "Review: the deployments or the quota could not be read. $reason"
+    }
+}
+
 function Invoke-NeologikPreWindowRun {
     # The first run: the checks. The first run removes nothing.
     $state = $script:State
@@ -4347,6 +4577,9 @@ function Invoke-NeologikPreWindowRun {
         # The Neologik Platform reads the tag before an upgrade.
         Set-NeologikKitVersionTag -ResourceId "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
     }
+    # The quotas, read with the same Azure session, after the roles: a quota that is short
+    # is settled with Microsoft before the migration.
+    Test-NeologikAzureQuota
 }
 
 function Invoke-NeologikPostWindowRun {
