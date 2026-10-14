@@ -400,6 +400,13 @@ BeforeAll {
         $json = $null
         if ($Body) { $json = $Body | ConvertFrom-Json -AsHashtable }
         switch -Regex ($path) {
+            '^/directoryObjects/([^/]+)$' {
+                # Any object of the directory by id: a user, a group or a service principal.
+                $id = $Matches[1]
+                $known = @($t.ServicePrincipals | ForEach-Object { $_.id }) + @($t.Groups | ForEach-Object { $_.id }) + @($t.Users | ForEach-Object { $_.id }) + @($t.Me)
+                if ($known -contains $id) { return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $id } } }
+                return @{ StatusCode = 404; Headers = @{}; Body = @{ error = @{ code = 'Request_ResourceNotFound'; message = 'not found' } } }
+            }
             '^/me$' { return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $t.Me; userPrincipalName = 'admin@contoso.com'; displayName = 'Contoso Administrator' } } }
             '^/me/memberOf/microsoft\.graph\.directoryRole$' {
                 return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items @($t.MeDirectoryRoles) -Uri $Uri -Query $query) }
@@ -877,11 +884,18 @@ BeforeAll {
     Mock Get-AzRoleAssignment {
         param($ObjectId, $RoleDefinitionName, $Scope)
         # Azure returns the assignment at the scope and every inherited one above it.
+        # Without -ObjectId it returns every principal's assignments. An assignment
+        # whose principal is gone from the directory reads ObjectType Unknown, as Azure
+        # reports it; every other reads ServicePrincipal.
         @($script:Tenant.AzRoleAssignments | Where-Object {
-                $_.ObjectId -eq $ObjectId -and
+                ((-not $ObjectId) -or $_.ObjectId -eq $ObjectId) -and
                 ((-not $RoleDefinitionName) -or $_.RoleDefinitionName -eq $RoleDefinitionName) -and
                 ((-not $Scope) -or $Scope.StartsWith($_.Scope, [System.StringComparison]::OrdinalIgnoreCase))
-            } | ForEach-Object { [pscustomobject]$_ })
+            } | ForEach-Object {
+                $entry = @{} + $_
+                if (-not $entry.ContainsKey('ObjectType')) { $entry.ObjectType = 'ServicePrincipal' }
+                [pscustomobject]$entry
+            })
     }
     Mock New-AzRoleAssignment {
         param($ObjectId, $RoleDefinitionName, $RoleDefinitionId, $Scope, $Condition, $ConditionVersion)
@@ -3037,6 +3051,51 @@ Context 'The first run removes nothing (project#3170)' {
         ($script:Console -join "`n") | Should -Match 'The later run is complete'
         $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PostWindow_*.json')
         $files | Should -HaveCount 1
+    }
+
+    It 'in the later run removes the role assignments on the resource group whose identity no longer exists, and only those' {
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        $gone = [guid]::NewGuid().ToString()
+        $goneAtSubscription = [guid]::NewGuid().ToString()
+        # An assignment whose identity Azure cannot resolve but the directory still holds:
+        # the Dev Team group's id stands in for such an identity.
+        $unresolvedButPresent = $script:Ids.DevTeamGroup
+        $script:Tenant.Groups += @{ id = $script:Ids.DevTeamGroup; displayName = 'Neologik Dev Team'; members = @(); appRoleAssignments = @() }
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $gone; ObjectType = 'Unknown'; RoleDefinitionName = 'Contributor'; Scope = $script:RgScope }
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $gone; ObjectType = 'Unknown'; RoleDefinitionName = 'Key Vault Secrets User'; Scope = $script:RgScope }
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $goneAtSubscription; ObjectType = 'Unknown'; RoleDefinitionName = 'Reader'; Scope = $script:SubScope }
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $unresolvedButPresent; ObjectType = 'Unknown'; RoleDefinitionName = 'Reader'; Scope = $script:RgScope }
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        # The first run removes nothing.
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $gone }) | Should -HaveCount 2
+        $script:Writes = @()
+        $script:Summary = @()
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult "Orphaned role assignment: Contributor for identity $gone" | Should -Be 'Removed'
+        Get-SummaryResult "Orphaned role assignment: Key Vault Secrets User for identity $gone" | Should -Be 'Removed'
+        Get-SummaryResult "Orphaned role assignment: Reader for identity $unresolvedButPresent" | Should -Match '^Review'
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $gone }) | Should -HaveCount 0
+        # Inherited from the subscription: never touched by the later run's resource-group sweep.
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $goneAtSubscription }) | Should -HaveCount 1
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $unresolvedButPresent }) | Should -HaveCount 1
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Already set: $script:KitVersion"
+    }
+
+    It 'reports the orphaned role assignments as pending in a run with -Verify and removes nothing' {
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        $gone = [guid]::NewGuid().ToString()
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $gone; ObjectType = 'Unknown'; RoleDefinitionName = 'Contributor'; Scope = $script:RgScope }
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $script:Writes = @()
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $gone; ObjectType = 'Unknown'; RoleDefinitionName = 'Contributor'; Scope = $script:RgScope }
+        $code = Invoke-Run @{ LaterRun = $true; Verify = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        @($script:Writes | Where-Object { $_ -like 'REMOVE az role*' }) | Should -HaveCount 0
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $gone }) | Should -HaveCount 1
     }
 
     It 'needs SubscriptionId and ResourceGroupName for the later run with -LaterRun' {
