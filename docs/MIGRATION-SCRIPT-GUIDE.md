@@ -164,6 +164,7 @@ The migration script first confirms the two Microsoft Graph application permissi
 | Every other Azure role in the subscription | The role is outside the ten roles of step 5. The migration script keeps the role `Cognitive Services Content Understanding Contributor` on a resource in the resource group |
 | Every other directory role | The deployment identity holds the role |
 | Every other group membership | The deployment identity is a member |
+| Every role assignment on the resource group whose identity is gone | The identity of the assignment is gone from Microsoft Entra ID. The migration retires the identities of the previous platform version. Their role assignments outlive them. They grant nothing, and the Azure portal shows them as "Identity not found". The migration script confirms with Microsoft Entra ID that the identity is gone before it removes the assignment. An assignment whose identity still exists is kept and reads `Review` in the summary |
 
 Last, the migration script records the version of the onboarding kit on the resource group, in the tag `NeologikOnboardingKit`.
 

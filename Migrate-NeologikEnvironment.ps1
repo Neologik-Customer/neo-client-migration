@@ -3716,6 +3716,84 @@ function Test-NeologikDeclaredAzureRole {
     return $false
 }
 
+function Test-NeologikDirectoryObjectExists {
+    # Returns whether an object with this id exists in Microsoft Entra ID: a user, a
+    # group, a service principal or a managed identity. A read that answers HTTP 404
+    # means the object is gone. Any other failure throws, so that a caller never
+    # reads a refused read as an absent object.
+    param([Parameter(Mandatory)][string]$ObjectId)
+    try {
+        $null = Invoke-NeologikGraph -Method 'GET' -Uri "https://graph.microsoft.com/v1.0/directoryObjects/$ObjectId"
+        return $true
+    }
+    catch {
+        if ((Get-NeologikHttpStatus $_) -eq 404) { return $false }
+        throw
+    }
+}
+
+function Remove-NeologikOrphanedRoleAssignment {
+    # Step 6h: the function removes every role assignment on the resource group whose
+    # identity is gone from Microsoft Entra ID. A migration retires the identities of
+    # the previous platform version. A role assignment outlives the identity it was
+    # made for. It grants nothing, and the Azure portal shows it as "Identity not
+    # found". Only assignments made on the resource group itself are read. An
+    # assignment inherited from the subscription is never touched. Azure reports the
+    # type of such an identity as Unknown. Microsoft Entra ID then confirms that the
+    # object is gone before the assignment is removed. An identity that Azure cannot
+    # resolve but that Microsoft Entra ID still holds is kept. It reads Review in the
+    # summary.
+    $state = $script:State
+    $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
+    try {
+        $assignments = @(Get-AzRoleAssignment -Scope $rgScope -ErrorAction Stop | Where-Object { $_.Scope -eq $rgScope })
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  Orphaned role assignments: FAILED. The script could not list the role assignments of the resource group. $reason" -Level Error
+        Add-Summary 'Orphaned role assignments' "FAILED: $reason"
+        return
+    }
+    $unresolved = @($assignments | Where-Object { ([string]$_.ObjectType) -eq 'Unknown' })
+    if ($unresolved.Count -eq 0) {
+        Write-Log '  Orphaned role assignments: none' -Level Success
+        Add-Summary 'Orphaned role assignments' 'None'
+        return
+    }
+    foreach ($assignment in $unresolved) {
+        $objectId = [string]$assignment.ObjectId
+        $roleName = [string]$assignment.RoleDefinitionName
+        $label = "Orphaned role assignment: $roleName for identity $objectId"
+        try {
+            if (Test-NeologikDirectoryObjectExists -ObjectId $objectId) {
+                Write-Log "  ${label}: the identity still exists in Microsoft Entra ID. The script keeps the assignment" -Level Warning
+                Add-Summary $label 'Review: the identity exists but Azure could not resolve it'
+                continue
+            }
+        }
+        catch {
+            $reason = Get-NeologikErrorText $_
+            Write-Log "  ${label}: the script could not confirm that the identity is gone. $reason" -Level Warning
+            Add-Summary $label "Review: $reason"
+            continue
+        }
+        if (Test-NeologikVerifyOnly) {
+            Add-NeologikPendingChange $label 'REMOVE'
+            continue
+        }
+        try {
+            Invoke-NeologikWrite -Command 'Remove-AzRoleAssignment' -Parameters @{ ObjectId = $objectId; RoleDefinitionName = $roleName; Scope = $rgScope } | Out-Null
+            Write-Log "  ${label}: removed" -Level Success
+            Add-Summary $label 'Removed'
+        }
+        catch {
+            $reason = Get-NeologikErrorText $_
+            Write-Log "  ${label}: FAILED. $reason" -Level Error
+            Add-Summary $label "FAILED: $reason"
+        }
+    }
+}
+
 function Remove-NeologikUndeclaredAzureRole {
     # Step 6e: the function removes every Azure role assignment of the deployment
     # identity in the subscription that is outside the declared set. The declared set is
@@ -3927,7 +4005,7 @@ function Invoke-NeologikPermissionReduction {
     $held = Set-NeologikDeploymentAzureRole -StepLabel 'Step 6 of 6: the permission reduction of the deployment identity' -ApplyLimit
     $reductionItems = @()
     foreach ($roleName in $script:LegacySubRoles) { $reductionItems += "Subscription role to remove: $roleName" }
-    $reductionItems += @('Application Administrator role', 'Admin User Group membership', 'Other Azure roles', 'Other directory roles', 'Other group memberships')
+    $reductionItems += @('Application Administrator role', 'Admin User Group membership', 'Other Azure roles', 'Other directory roles', 'Other group memberships', 'Orphaned role assignments')
     if (-not $state.AzureConnected) {
         foreach ($item in $reductionItems) { Add-Summary $item 'SKIPPED: the script did not confirm the Azure roles of the deployment identity' }
         return
@@ -3960,7 +4038,11 @@ function Invoke-NeologikPermissionReduction {
     Remove-NeologikUndeclaredDirectoryRole
     Remove-NeologikUndeclaredGroupMembership
 
-    # Step 6h: record the version of the onboarding kit, after every step above.
+    # Step 6h: remove the role assignments on the resource group whose identity is
+    # gone, left by the identities that the migration retired.
+    Remove-NeologikOrphanedRoleAssignment
+
+    # Step 6i: record the version of the onboarding kit, after every step above.
     Set-NeologikKitVersionTag -ResourceId $rgScope
 }
 
