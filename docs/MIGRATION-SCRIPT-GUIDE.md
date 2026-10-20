@@ -153,7 +153,7 @@ The command selects the later run with `-LaterRun`. Neologik asks for the later 
 
 ### Step 6: Permission reduction
 
-The migration script first confirms the two Microsoft Graph application permissions that the deployment identity keeps, and the ten Azure roles of step 5. The migration script assigns a role or grants a permission that is absent. The migration script writes the limit onto a Role Based Access Control Administrator assignment on the subscription that lacks it. The migration script removes the wider access only when the deployment identity holds all of them. When the migration script cannot assign one of the ten roles, the migration script removes nothing. The deployment never loses access part way through the run.
+The migration script first confirms the two Microsoft Graph application permissions that the deployment identity keeps, and the ten Azure roles of step 5. The migration script assigns a role or grants a permission that is absent. The migration script removes a Role Based Access Control Administrator assignment on the subscription that lacks the limit. The migration script then creates the assignment again with the limit. An assignment with an earlier limit is replaced the same way. Azure keeps the limit of an existing assignment on an update, so the migration script never updates the assignment. The migration script removes the wider access only when the deployment identity holds all of them. When the migration script cannot assign one of the ten roles, the migration script removes nothing. The deployment never loses access part way through the run.
 
 | What the migration script removes | Condition |
 |---|---|
