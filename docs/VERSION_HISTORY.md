@@ -28,7 +28,9 @@ This document lists the versions of the Neologik migration package. For each ver
 
 ## Version 1.1.0
 
-This version is on the line of Neologik Platform v5.1 and is not yet released.
+**Date**: 2026-10-20
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
 
 | Item | Change |
 |---|---|
