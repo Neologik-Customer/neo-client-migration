@@ -13,18 +13,31 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 1.1.0](#version-110)
-3. [Version 1.0.4](#version-104)
-4. [Version 1.0.3](#version-103)
-5. [Version 1.0.2](#version-102)
-6. [Version 1.0.1](#version-101)
-7. [Version 1.0.0](#version-100)
+2. [Version 1.1.1](#version-111)
+3. [Version 1.1.0](#version-110)
+4. [Version 1.0.4](#version-104)
+5. [Version 1.0.3](#version-103)
+6. [Version 1.0.2](#version-102)
+7. [Version 1.0.1](#version-101)
+8. [Version 1.0.0](#version-100)
 
 ## Scripts in this version
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.0 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.1 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the first run, and reduces the access in the later run |
+
+## Version 1.1.1
+
+**Date**: 2026-10-20
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | New step 6i of the later run. The later run gives the script runner identity, the managed identity `neologik-script-runner-service-connection-<short name>` that the deployment runs its scripts with, the role Reader on the resource group. Then the later run removes Contributor on the subscription and Contributor on the resource group from that identity. An onboarding before onboarding kit version 5.0.3 gave the identity Contributor instead of Reader. The later run removes nothing from the identity until the identity holds Reader. The command from Neologik names the identity with the new parameter `-ScriptRunnerObjectId`. Without the parameter the later run leaves the roles of the identity |
+| `Migrate-NeologikEnvironment.ps1` | A run with `-Verify` reports the three changes of step 6i as `WOULD ASSIGN` and `WOULD REMOVE` and writes nothing |
+| `MIGRATION-SCRIPT-GUIDE.md`, `MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` | Step 6i described |
 
 ## Version 1.1.0
 
