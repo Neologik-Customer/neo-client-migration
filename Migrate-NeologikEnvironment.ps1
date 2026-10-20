@@ -3480,10 +3480,12 @@ function Set-NeologikLimitedAzureRoleAssignment {
     Assigns the role Role Based Access Control Administrator to the deployment identity
     on the subscription, with the condition that limits the roles the deployment
     identity may assign. An assignment that carries the condition is reported, not
-    recreated. An assignment without the condition is wider than the deployment needs:
-    the first run reports it and keeps it, because the first run removes nothing; the
-    later run, with -ApplyLimit, writes the condition onto the assignment. Returns $true
-    when the deployment identity holds the role.
+    recreated. An assignment without the condition, or with an earlier condition, is
+    wider than the deployment needs: the first run reports it and keeps it, because the
+    first run removes nothing; the later run, with -ApplyLimit, removes the assignment
+    and creates it again with the condition, because Azure keeps the condition of an
+    existing assignment on an update. Returns $true when the deployment identity holds
+    the role.
     #>
     param([string]$Scope, [string]$Label, [switch]$ApplyLimit)
     $deploySp = $script:State.DeploySp
@@ -3509,34 +3511,68 @@ function Set-NeologikLimitedAzureRoleAssignment {
                 Add-NeologikPendingChange $item 'APPLY THE LIMIT'
                 return $true
             }
-            $assignment = $assignments[0]
-            $assignment | Add-Member -NotePropertyName Condition -NotePropertyValue $script:LimitedSubRoleCondition -Force
-            $assignment | Add-Member -NotePropertyName ConditionVersion -NotePropertyValue $script:LimitedSubRoleConditionVersion -Force
-            Invoke-NeologikWrite -Command 'Set-AzRoleAssignment' -Parameters @{ InputObject = $assignment } | Out-Null
-            Write-Log "  $item role '$roleName': limit applied" -Level Success
-            Add-Summary $item 'Limit applied'
-            return $true
+            # Azure keeps the condition of an existing assignment on an update, so the
+            # migration script removes the assignment and creates it again below with the
+            # condition. Azure answers a read with the removed assignment for a while, so
+            # the migration script waits until the read no longer returns it.
+            Invoke-NeologikWrite -Command 'Remove-AzRoleAssignment' -Parameters @{
+                ObjectId           = $deploySp.Id
+                RoleDefinitionName = $roleName
+                Scope              = $Scope
+            } | Out-Null
+            Write-Log "  $item role '$roleName': the assignment without the limit is removed" -Level Info
+            $replaced = $true
+            $removeChecks = 0
+            while ($removeChecks -lt 12) {
+                $remaining = @(Get-AzRoleAssignment -ObjectId $deploySp.Id -RoleDefinitionName $roleName -Scope $Scope -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Scope -eq $Scope })
+                if ($remaining.Count -eq 0) { break }
+                $removeChecks++
+                Write-Log "  $item role '$roleName': Azure still shows the removed assignment. The migration script reads again in 5 seconds. Attempt $removeChecks of 12" -Level Warning
+                Start-Sleep -Seconds 5
+            }
+        }
+        else {
+            $replaced = $false
         }
         if (Test-NeologikVerifyOnly) {
             Add-NeologikPendingChange $item 'ASSIGN'
             return $true
         }
-        try {
-            Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{
-                ObjectId         = $deploySp.Id
-                RoleDefinitionId = $script:LimitedSubRoleId
-                Scope            = $Scope
-                Condition        = $script:LimitedSubRoleCondition
-                ConditionVersion = $script:LimitedSubRoleConditionVersion
-            } | Out-Null
-        }
-        catch {
-            if ((Get-NeologikErrorText $_) -match '(?i)RoleAssignmentExists|already exists') {
-                Write-Log "  $item role '$roleName': already assigned" -Level Success
-                Add-Summary $item 'Already assigned'
-                return $true
+        $createAttempts = 0
+        while ($true) {
+            try {
+                Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{
+                    ObjectId         = $deploySp.Id
+                    RoleDefinitionId = $script:LimitedSubRoleId
+                    Scope            = $Scope
+                    Condition        = $script:LimitedSubRoleCondition
+                    ConditionVersion = $script:LimitedSubRoleConditionVersion
+                } | Out-Null
+                break
             }
-            throw
+            catch {
+                if (-not ((Get-NeologikErrorText $_) -match '(?i)RoleAssignmentExists|already exists')) { throw }
+                # The assignment exists. With the condition, the role is held. Without it,
+                # after a removal, Azure answered for the removed assignment, and the
+                # migration script tries again.
+                $held = @(Get-AzRoleAssignment -ObjectId $deploySp.Id -RoleDefinitionName $roleName -Scope $Scope -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Scope -eq $Scope -and (ConvertTo-NeologikConditionKey ([string](Get-NeologikProperty $_ 'Condition' ''))) -eq $wanted })
+                if ($held.Count -gt 0 -or -not $replaced) {
+                    Write-Log "  $item role '$roleName': already assigned" -Level Success
+                    Add-Summary $item 'Already assigned'
+                    return $true
+                }
+                $createAttempts++
+                if ($createAttempts -ge 6) { throw }
+                Write-Log "  $item role '$roleName': Azure still shows the removed assignment. The migration script tries again in 10 seconds. Attempt $createAttempts of 6" -Level Warning
+                Start-Sleep -Seconds 10
+            }
+        }
+        if ($replaced) {
+            Write-Log "  $item role '$roleName': limit applied" -Level Success
+            Add-Summary $item 'Limit applied'
+            return $true
         }
         Write-Log "  $item role '$roleName': assigned with the limit" -Level Success
         Add-Summary $item 'Assigned'

@@ -163,6 +163,10 @@ BeforeAll {
             Users                 = @()
             DirectoryRoles        = @()
             AzRoleAssignments     = @()
+            StaleAzRoleAssignments = @()
+            StaleAzRoleReads      = 0
+            # how many reads after a removal still show the removed assignment
+            StaleAzRoleReadsAfterRemoval = 0
             PageSize              = 0
             PrincipalCreateDelays = 0
             GrantRefusals         = @()
@@ -887,7 +891,12 @@ BeforeAll {
         # Without -ObjectId it returns every principal's assignments. An assignment
         # whose principal is gone from the directory reads ObjectType Unknown, as Azure
         # reports it; every other reads ServicePrincipal.
-        @($script:Tenant.AzRoleAssignments | Where-Object {
+        $visible = @($script:Tenant.AzRoleAssignments)
+        if ([int]$script:Tenant.StaleAzRoleReads -gt 0) {
+            $script:Tenant.StaleAzRoleReads--
+            $visible += @($script:Tenant.StaleAzRoleAssignments)
+        }
+        @($visible | Where-Object {
                 ((-not $ObjectId) -or $_.ObjectId -eq $ObjectId) -and
                 ((-not $RoleDefinitionName) -or $_.RoleDefinitionName -eq $RoleDefinitionName) -and
                 ((-not $Scope) -or $Scope.StartsWith($_.Scope, [System.StringComparison]::OrdinalIgnoreCase))
@@ -918,8 +927,14 @@ BeforeAll {
     }
     Mock Remove-AzRoleAssignment {
         param($ObjectId, $RoleDefinitionName, $Scope)
+        # Azure answers reads with a removed assignment for a while: the model keeps the
+        # removed entries in StaleAzRoleAssignments, and Get-AzRoleAssignment returns them
+        # for StaleAzRoleReads more reads.
+        $script:Tenant.StaleAzRoleAssignments += @($script:Tenant.AzRoleAssignments | Where-Object {
+                $_.ObjectId -eq $ObjectId -and $_.RoleDefinitionName -eq $RoleDefinitionName -and $_.Scope -eq $Scope })
         $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object {
                 -not ($_.ObjectId -eq $ObjectId -and $_.RoleDefinitionName -eq $RoleDefinitionName -and $_.Scope -eq $Scope) })
+        $script:Tenant.StaleAzRoleReads = [int]$script:Tenant.StaleAzRoleReadsAfterRemoval
         Add-Write "REMOVE az role $RoleDefinitionName $Scope"
     }
 }
@@ -2437,9 +2452,87 @@ Context 'The later run: permission reduction (step 6)' {
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Limit applied'
-        Should -Invoke Set-AzRoleAssignment -Times 1
-        @($script:Writes | Where-Object { $_ -like 'LIMIT az role Role Based Access Control Administrator *' }) | Should -HaveCount 1
-        @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })[0].Condition | Should -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+        # Azure keeps the condition of an assignment on an update, so the later run removes
+        # the assignment and creates it again with the limit; it never updates in place.
+        Should -Invoke Set-AzRoleAssignment -Times 0
+        Should -Invoke Remove-AzRoleAssignment -Times 1
+        @($script:Writes | Where-Object { $_ -like 'REMOVE az role Role Based Access Control Administrator *' }) | Should -HaveCount 1
+        @($script:Writes | Where-Object { $_ -like 'NEW az role Role Based Access Control Administrator * limited' }) | Should -HaveCount 1
+        $limited = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $limited | Should -HaveCount 1
+        $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
+        $limited[0].Condition | Should -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+    }
+
+    It 'in the later run replaces a limited assignment that carries the two-role condition with the three-role condition' {
+        Add-CompliantPreWindowState
+        $twoRole = $script:LimitedSubRoleCondition -replace ', 72fafb9e-0641-4937-9268-a91bfd8191a3', ''
+        $twoRole | Should -Not -Be $script:LimitedSubRoleCondition
+        foreach ($entry in $script:Tenant.AzRoleAssignments) {
+            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Condition = $twoRole }
+        }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Limit applied'
+        Should -Invoke Set-AzRoleAssignment -Times 0
+        @($script:Writes | Where-Object { $_ -like 'REMOVE az role Role Based Access Control Administrator *' }) | Should -HaveCount 1
+        @($script:Writes | Where-Object { $_ -like 'NEW az role Role Based Access Control Administrator * limited' }) | Should -HaveCount 1
+        $limited = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $limited | Should -HaveCount 1
+        $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
+    }
+
+    It 'in the later run waits until Azure no longer shows the removed assignment before creating the limited one' {
+        Add-CompliantPreWindowState
+        foreach ($entry in $script:Tenant.AzRoleAssignments) {
+            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
+        }
+        $script:Tenant.StaleAzRoleReadsAfterRemoval = 3
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Limit applied'
+        @($script:Sleeps | Where-Object { $_ -eq 5 }) | Should -HaveCount 3
+        $script:Tenant.StaleAzRoleReads | Should -Be 0
+        @($script:Writes | Where-Object { $_ -like 'REMOVE az role Role Based Access Control Administrator *' }) | Should -HaveCount 1
+        @($script:Writes | Where-Object { $_ -like 'NEW az role Role Based Access Control Administrator * limited' }) | Should -HaveCount 1
+        $limited = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $limited | Should -HaveCount 1
+        $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
+    }
+
+    It 'in the later run tries the create again when Azure answers "already exists" for the removed assignment' {
+        Add-CompliantPreWindowState
+        foreach ($entry in $script:Tenant.AzRoleAssignments) {
+            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
+        }
+        $script:CreateRefusals = 2
+        Mock New-AzRoleAssignment {
+            param($ObjectId, $RoleDefinitionName, $RoleDefinitionId, $Scope, $Condition, $ConditionVersion)
+            if ($script:CreateRefusals -gt 0) { $script:CreateRefusals--; throw 'RoleAssignmentExists: The role assignment already exists.' }
+            $script:Tenant.AzRoleAssignments += @{ ObjectId = $ObjectId; RoleDefinitionName = $script:LimitedSubRole; Scope = $Scope; Condition = $Condition; ConditionVersion = $ConditionVersion }
+            Add-Write "NEW az role $($script:LimitedSubRole) $Scope limited"
+        }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Limit applied'
+        $script:CreateRefusals | Should -Be 0
+        @($script:Sleeps | Where-Object { $_ -eq 10 }) | Should -HaveCount 2
+        @($script:Writes | Where-Object { $_ -like 'NEW az role Role Based Access Control Administrator * limited' }) | Should -HaveCount 1
+        $limited = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $limited | Should -HaveCount 1
+        $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
+    }
+
+    It 'in the later run with -Verify reports the limit as a pending change and removes nothing' {
+        Add-CompliantPreWindowState
+        foreach ($entry in $script:Tenant.AzRoleAssignments) {
+            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
+        }
+        $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); Verify = $true }
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'WOULD APPLY THE LIMIT'
+        Should -Invoke Remove-AzRoleAssignment -Times 0
+        Should -Invoke New-AzRoleAssignment -Times 0
+        Should -Invoke Set-AzRoleAssignment -Times 0
     }
 
     It 'with -Verify reports the limited role as WOULD ASSIGN and writes nothing' {
