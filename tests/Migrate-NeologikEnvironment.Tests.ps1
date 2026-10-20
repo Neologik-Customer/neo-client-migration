@@ -71,6 +71,7 @@ BeforeAll {
         Subscription     = '22222222-2222-2222-2222-222222222222'
         DeployAppId      = '33333333-3333-3333-3333-333333333333'
         DeploySpId       = '33333333-aaaa-3333-3333-333333333333'
+        ScriptRunnerId   = '33333333-bbbb-3333-3333-333333333333'
         GraphSpId        = '00000003-aaaa-0000-c000-000000000000'
         SignInAppId      = '44444444-4444-4444-4444-444444444444'
         SignInSpId       = '44444444-aaaa-4444-4444-444444444444'
@@ -296,6 +297,23 @@ BeforeAll {
         # the Admin User Group (its only SQL access while the group is the
         # server administrator).
         Add-AdminGroupMembership
+    }
+
+    function Add-LegacyScriptRunnerState {
+        # The script runner identity as an onboarding before kit version 5.0.3 left it:
+        # Contributor on the subscription and on the resource group, beside the two
+        # roles it keeps on the resource group, and no Reader (project#2970).
+        $t = $script:Tenant
+        $t.AzRoleAssignments += @{ ObjectId = $script:Ids.ScriptRunnerId; RoleDefinitionName = 'Contributor'; Scope = $script:SubScope }
+        foreach ($roleName in @('Contributor', 'Key Vault Secrets Officer', 'Azure Bot Service Contributor Role')) {
+            $t.AzRoleAssignments += @{ ObjectId = $script:Ids.ScriptRunnerId; RoleDefinitionName = $roleName; Scope = $script:RgScope }
+        }
+    }
+
+    function Get-ScriptRunnerRoles {
+        param([string]$Scope)
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.ScriptRunnerId -and $_.Scope -eq $Scope } |
+            ForEach-Object { $_.RoleDefinitionName } | Sort-Object)
     }
 
     function Add-UndeclaredState {
@@ -2338,6 +2356,92 @@ Context 'Graph resilience' {
         $code | Should -Be 1
         Get-SummaryResult 'Run' | Should -Be 'FAILED: unexpected error. something nobody anticipated'
         @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PreWindow_*.json') | Should -HaveCount 1
+    }
+}
+
+Context 'The later run: the script runner identity (step 6i, project#2970)' {
+    It 'gives the script runner identity Reader on the resource group, then removes both Contributor roles' {
+        Add-CompliantPreWindowState
+        Add-LegacyScriptRunnerState
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); ScriptRunnerObjectId = $script:Ids.ScriptRunnerId }
+        $code | Should -Be 0
+        $script:Writes | Should -Be @(
+            "NEW az role Reader $script:RgScope",
+            "REMOVE az role Contributor $script:SubScope",
+            "REMOVE az role Contributor $script:RgScope")
+        Get-SummaryResult 'Script runner identity resource group role: Reader' | Should -Be 'Assigned'
+        Get-SummaryResult 'Script runner identity subscription role to remove: Contributor' | Should -Be 'Removed'
+        Get-SummaryResult 'Script runner identity resource group role to remove: Contributor' | Should -Be 'Removed'
+        Get-ScriptRunnerRoles $script:SubScope | Should -HaveCount 0
+        Get-ScriptRunnerRoles $script:RgScope | Should -Be @('Azure Bot Service Contributor Role', 'Key Vault Secrets Officer', 'Reader')
+        # The deployment identity's own roles are untouched by the step.
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.DeploySpId }) | Should -HaveCount 10
+    }
+
+    It 'changes nothing for a script runner identity that already holds Reader and no Contributor' {
+        Add-CompliantPreWindowState
+        foreach ($roleName in @('Reader', 'Key Vault Secrets Officer', 'Azure Bot Service Contributor Role')) {
+            $script:Tenant.AzRoleAssignments += @{ ObjectId = $script:Ids.ScriptRunnerId; RoleDefinitionName = $roleName; Scope = $script:RgScope }
+        }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); ScriptRunnerObjectId = $script:Ids.ScriptRunnerId }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'Script runner identity resource group role: Reader' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Script runner identity subscription role to remove: Contributor' | Should -Be 'Not held'
+        Get-SummaryResult 'Script runner identity resource group role to remove: Contributor' | Should -Be 'Not held'
+    }
+
+    It 'keeps both Contributor roles when Reader could not be assigned' {
+        Add-CompliantPreWindowState
+        Add-LegacyScriptRunnerState
+        Mock New-AzRoleAssignment { param($ObjectId) if ($ObjectId -eq $script:Ids.ScriptRunnerId) { throw 'AuthorizationFailed: The client does not have authorization' }; Add-Write "NEW az role $RoleDefinitionName $Scope" }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); ScriptRunnerObjectId = $script:Ids.ScriptRunnerId }
+        $code | Should -Be 1
+        (Get-SummaryResult 'Script runner identity resource group role: Reader') | Should -Match '^FAILED: insufficient privileges'
+        Get-SummaryResult 'Script runner identity subscription role to remove: Contributor' | Should -Be 'SKIPPED: the script runner identity does not hold Reader on the resource group'
+        Should -Invoke Remove-AzRoleAssignment -Times 0
+        Get-ScriptRunnerRoles $script:SubScope | Should -Be @('Contributor')
+    }
+
+    It 'leaves the script runner identity alone when the command does not name it' {
+        Add-CompliantPreWindowState
+        Add-LegacyScriptRunnerState
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'Script runner identity resource group role: Reader' | Should -BeNullOrEmpty
+        Get-ScriptRunnerRoles $script:SubScope | Should -Be @('Contributor')
+        ($script:Console -join "`n") | Should -Match 'does not name the script runner identity'
+    }
+
+    It 'with -Verify reports the three changes as pending and writes nothing' {
+        Add-CompliantPreWindowState
+        Add-LegacyScriptRunnerState
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); ScriptRunnerObjectId = $script:Ids.ScriptRunnerId; Verify = $true }
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'Script runner identity resource group role: Reader' | Should -Be 'WOULD ASSIGN'
+        Get-SummaryResult 'Script runner identity subscription role to remove: Contributor' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Script runner identity resource group role to remove: Contributor' | Should -Be 'WOULD REMOVE'
+        Get-ScriptRunnerRoles $script:SubScope | Should -Be @('Contributor')
+    }
+
+    It 'skips the script runner rows with the rest when the deployment identity lacks a role' {
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        Add-LegacyScriptRunnerState
+        Mock New-AzRoleAssignment { param($RoleDefinitionName) if ($RoleDefinitionName -eq 'Monitoring Contributor') { throw 'AuthorizationFailed: The client does not have authorization' }; Add-Write "NEW az role $RoleDefinitionName $Scope" }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); ScriptRunnerObjectId = $script:Ids.ScriptRunnerId }
+        $code | Should -Be 1
+        Get-SummaryResult 'Script runner identity subscription role to remove: Contributor' | Should -Be 'SKIPPED: the deployment identity does not hold all ten Azure roles'
+        Should -Invoke Remove-AzRoleAssignment -Times 0
+    }
+
+    It 'refuses a script runner object id that is not a GUID before any sign-in' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); ScriptRunnerObjectId = 'not-a-guid' }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'ScriptRunnerObjectId must be a GUID'
+        Should -Invoke Connect-AzAccount -Times 0
     }
 }
 
