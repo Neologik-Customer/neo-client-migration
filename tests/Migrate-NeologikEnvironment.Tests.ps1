@@ -216,7 +216,7 @@ BeforeAll {
     }
 
     function Add-CompliantDirectoryState {
-        # Everything the first run verifies in the directory (steps 1 to 3),
+        # Everything the pre migration script verifies in the directory (steps 1 to 3),
         # already in place.
         $t = $script:Tenant
         $app = New-FakeApp -Id $script:Ids.BlueprintAppObj -AppId $script:Ids.BlueprintAppId -DisplayName "Neologik Agent Blueprint - default - $script:ShortName"
@@ -358,7 +358,7 @@ BeforeAll {
     }
 
     function Add-CompliantPreWindowState {
-        # Everything the first run verifies, in the directory and in Azure,
+        # Everything the pre migration script verifies, in the directory and in Azure,
         # already in place: the run changes nothing.
         Add-CompliantDirectoryState
         Add-CompliantAzureState
@@ -1101,10 +1101,10 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         Should -Invoke Connect-MgGraph -Times 0
     }
 
-    It 'requires the subscription and resource group for the first run' {
+    It 'requires the subscription and resource group for the pre migration script' {
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'first run needs SubscriptionId'
+        ($script:Console -join "`n") | Should -Match 'pre migration script needs SubscriptionId'
         Should -Invoke Connect-MgGraph -Times 0
     }
 
@@ -1211,7 +1211,7 @@ Context 'Modules and sign-in' {
         $scopes | Should -Contain 'Directory.Read.All'
         $scopes | Should -Contain 'User.Read'
         $scopes | Should -Contain 'AppRoleAssignment.ReadWrite.All'
-        # The first run removes no directory role (project#3170): the scope belongs to the later run.
+        # The pre migration script removes no directory role (project#3170): the scope belongs to the post migration script.
         $scopes | Should -Not -Contain 'RoleManagement.ReadWrite.Directory'
         $scopes | Should -Contain 'GroupMember.ReadWrite.All'
         $scopes | Should -Contain 'AgentIdentityBlueprintPrincipal.ReadWrite.All'
@@ -1663,7 +1663,7 @@ Context 'Blueprint short name' {
     }
 }
 
-Context 'The first run on a compliant environment' {
+Context 'The pre migration script on a compliant environment' {
     It 'records the kit version on the resource group once the reduction is complete, and leaves it when in place' {
         Add-CompliantPreWindowState
         $script:Tenant.ResourceGroupTags = @{ Vendor = 'Neologik' }
@@ -1725,11 +1725,11 @@ Context 'The first run on a compliant environment' {
         Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be 'Not needed. No SharePoint application of Neologik holds a SharePoint permission'
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Already assigned'
         Get-SummaryResult 'Subscription role: Cost Management Contributor' | Should -Be 'Already assigned'
-        # The first run reports no removal item (project#3170): the removals belong to the later run.
+        # The pre migration script reports no removal item (project#3170): the removals belong to the post migration script.
         @($script:Summary | Where-Object { $_.Item -match 'to remove|Application Administrator role|Admin User Group membership|^Other ' }) | Should -HaveCount 0
         Should -Invoke Connect-AzAccount -Times 1
-        ($script:Console -join "`n") | Should -Match 'first run'
-        ($script:Console -join "`n") | Should -Match 'The first run is complete'
+        ($script:Console -join "`n") | Should -Match 'pre migration script'
+        ($script:Console -join "`n") | Should -Match 'The pre migration script is complete'
     }
 
     It 'checks the Sites.Selected consent when the configuration file records SharePoint ingestion' {
@@ -1785,7 +1785,7 @@ Context 'The first run on a compliant environment' {
         $script:Writes | Should -HaveCount 0
     }
 
-    It 'refuses the first run without a short name rather than guessing it from a display name' {
+    It 'refuses the pre migration script without a short name rather than guessing it from a display name' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionName = $script:SolutionName; SignInAppClientId = $script:Ids.SignInAppId; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
@@ -1813,7 +1813,7 @@ Context 'The first run on a compliant environment' {
         $script:Writes | Should -HaveCount 0
     }
 
-    It 'refuses the first run without the sign-in app client id or the solution name' {
+    It 'refuses the pre migration script without the sign-in app client id or the solution name' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ TenantId = $script:Ids.Tenant; DeploySpClientId = $script:Ids.DeployAppId; SolutionShortName = $script:ShortName; SolutionName = $script:SolutionName; NceUserGroupId = $script:Ids.Group; SubscriptionId = $script:Ids.Subscription; ResourceGroupName = $script:RgName }
         $code | Should -Be 1
@@ -1837,8 +1837,8 @@ Context 'The first run on a compliant environment' {
     }
 }
 
-Context 'The first run on an environment with missing state' {
-    It 'in the later run grants the retained access and then removes the wider access, in that order' {
+Context 'The pre migration script on an environment with missing state' {
+    It 'in the post migration script grants the retained access and then removes the wider access, in that order' {
         Add-CompliantPreWindowState
         $deploy = Get-FakeSp -Id $script:Ids.DeploySpId
         $deploy.appRoleAssignments = @()
@@ -2359,7 +2359,7 @@ Context 'Graph resilience' {
     }
 }
 
-Context 'The later run: the script runner identity (step 6i, project#2970)' {
+Context 'The post migration script: the script runner identity (step 6i, project#2970)' {
     It 'gives the script runner identity Reader on the resource group, then removes both Contributor roles' {
         Add-CompliantPreWindowState
         Add-LegacyScriptRunnerState
@@ -2445,7 +2445,7 @@ Context 'The later run: the script runner identity (step 6i, project#2970)' {
     }
 }
 
-Context 'The later run: permission reduction (step 6)' {
+Context 'The post migration script: permission reduction (step 6)' {
     It 'on an already-hardened environment creates only the Cost Management Contributor grant' {
         Add-CompliantPreWindowState
         $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -ne 'Cost Management Contributor' })
@@ -2541,14 +2541,14 @@ Context 'The later run: permission reduction (step 6)' {
         @($script:Writes | Where-Object { $_ -like '*az role*' }) | Should -HaveCount 0
     }
 
-    It 'reports a Role Based Access Control Administrator held without the limit, and the later run applies the limit' {
+    It 'reports a Role Based Access Control Administrator held without the limit, and the post migration script applies the limit' {
         Add-CompliantPreWindowState
         foreach ($entry in $script:Tenant.AzRoleAssignments) {
             if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
         }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Already assigned without the limit. The later run applies the limit'
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Already assigned without the limit. The post migration script applies the limit'
         Should -Invoke Set-AzRoleAssignment -Times 0
         Should -Invoke New-AzRoleAssignment -Times 0
         $script:Writes = @()
@@ -2556,7 +2556,7 @@ Context 'The later run: permission reduction (step 6)' {
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Limit applied'
-        # Azure keeps the condition of an assignment on an update, so the later run removes
+        # Azure keeps the condition of an assignment on an update, so the post migration script removes
         # the assignment and creates it again with the limit; it never updates in place.
         Should -Invoke Set-AzRoleAssignment -Times 0
         Should -Invoke Remove-AzRoleAssignment -Times 1
@@ -2568,7 +2568,7 @@ Context 'The later run: permission reduction (step 6)' {
         $limited[0].Condition | Should -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
     }
 
-    It 'in the later run replaces a limited assignment that carries the two-role condition with the three-role condition' {
+    It 'in the post migration script replaces a limited assignment that carries the two-role condition with the three-role condition' {
         Add-CompliantPreWindowState
         $twoRole = $script:LimitedSubRoleCondition -replace ', 72fafb9e-0641-4937-9268-a91bfd8191a3', ''
         $twoRole | Should -Not -Be $script:LimitedSubRoleCondition
@@ -2586,7 +2586,7 @@ Context 'The later run: permission reduction (step 6)' {
         $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
     }
 
-    It 'in the later run waits until Azure no longer shows the removed assignment before creating the limited one' {
+    It 'in the post migration script waits until Azure no longer shows the removed assignment before creating the limited one' {
         Add-CompliantPreWindowState
         foreach ($entry in $script:Tenant.AzRoleAssignments) {
             if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
@@ -2604,7 +2604,7 @@ Context 'The later run: permission reduction (step 6)' {
         $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
     }
 
-    It 'in the later run tries the create again when Azure answers "already exists" for the removed assignment' {
+    It 'in the post migration script tries the create again when Azure answers "already exists" for the removed assignment' {
         Add-CompliantPreWindowState
         foreach ($entry in $script:Tenant.AzRoleAssignments) {
             if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
@@ -2627,7 +2627,7 @@ Context 'The later run: permission reduction (step 6)' {
         $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
     }
 
-    It 'in the later run with -Verify reports the limit as a pending change and removes nothing' {
+    It 'in the post migration script with -Verify reports the limit as a pending change and removes nothing' {
         Add-CompliantPreWindowState
         foreach ($entry in $script:Tenant.AzRoleAssignments) {
             if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
@@ -2772,7 +2772,7 @@ Context 'Verify-only run (-Verify)' {
         Get-SummaryResult 'Agent identity blueprint sponsor' | Should -Be 'WOULD SET at creation: the signed-in administrator'
         Get-SummaryResult 'Agent identity blueprint credential: github-oidc-neo-infrastructure' | Should -Be 'WOULD ADD'
         Get-SummaryResult 'Deployment identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'WOULD GRANT'
-        Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -BeNullOrEmpty -Because 'the first run removes nothing (project#3170)'
+        Get-SummaryResult 'Deployment identity permission to remove: Application.Read.All' | Should -BeNullOrEmpty -Because 'the pre migration script removes nothing (project#3170)'
         Get-SummaryResult 'User group assignment' | Should -Be 'WOULD ASSIGN'
         Get-SummaryResult 'Administrator consent' | Should -Be 'MISSING: the script printed the consent address'
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'WOULD ASSIGN'
@@ -2801,7 +2801,7 @@ Context 'Verify-only run (-Verify)' {
         ($script:Console -join "`n") | Should -Match 'would change nothing'
     }
 
-    It 'reports every pending removal of the later run on a legacy environment, writes nothing and exits 1' {
+    It 'reports every pending removal of the post migration script on a legacy environment, writes nothing and exits 1' {
         Add-CompliantDirectoryState
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
         Add-LegacyAzureState
@@ -2812,8 +2812,8 @@ Context 'Verify-only run (-Verify)' {
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'WOULD ASSIGN'
         Get-SummaryResult 'Subscription role to remove: Contributor' | Should -Be 'WOULD REMOVE'
         Get-SummaryResult 'Application Administrator role' | Should -Be 'WOULD REMOVE'
-        Get-SummaryResult 'Agent identity blueprint' | Should -BeNullOrEmpty -Because 'the later run makes none of the checks of the first run'
-        ($script:Console -join "`n") | Should -Match 'later run with -Verify'
+        Get-SummaryResult 'Agent identity blueprint' | Should -BeNullOrEmpty -Because 'the post migration script makes none of the checks of the pre migration script'
+        ($script:Console -join "`n") | Should -Match 'post migration script with -Verify'
         $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PostWindow_*.json')
         $files | Should -HaveCount 1
         (Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | Should -HaveCount 3
@@ -2863,7 +2863,7 @@ Context 'Summary and exit code' {
             $result | Should -Match $script:AttentionPattern
         }
         foreach ($result in @('Present', 'Created', 'Already granted', 'Granted: User.Read', 'Removed', 'Not held', 'Not present', 'Not needed', 'Updated: a b',
-                'Not checked. The later run with -AgentGrantsFile makes the check', 'Kept. An email channel still uses the identity')) {
+                'Not checked. The post migration script with -AgentGrantsFile makes the check', 'Kept. An email channel still uses the identity')) {
             $result | Should -Not -Match $script:AttentionPattern
         }
     }
@@ -2878,7 +2878,7 @@ Context 'Summary and exit code' {
     }
 }
 
-Context 'The first run: security groups, guests and memberships (step 2, project#3127)' {
+Context 'The pre migration script: security groups, guests and memberships (step 2, project#3127)' {
     BeforeAll {
         function Set-LegacyGroupState {
             # The directory of an environment set up before version 5, with everything else
@@ -3007,7 +3007,7 @@ Context 'The first run: security groups, guests and memberships (step 2, project
         (Get-SummaryResult 'Neologik guest users') | Should -Be 'Present: 1. Invited: second@neologik.ai'
     }
 
-    It 'requests the group and invitation scopes for the first run' {
+    It 'requests the group and invitation scopes for the pre migration script' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
@@ -3017,7 +3017,7 @@ Context 'The first run: security groups, guests and memberships (step 2, project
     }
 }
 
-Context 'The later run: Admin User Group membership' {
+Context 'The post migration script: Admin User Group membership' {
     BeforeEach {
         Add-CompliantDirectoryState
         Add-CompliantAzureState
@@ -3117,7 +3117,7 @@ Context 'The later run: Admin User Group membership' {
         Get-SummaryResult 'Admin User Group membership' | Should -Be 'Not held'
     }
 
-    It 'requests the group-member and directory role scopes for the later run' {
+    It 'requests the group-member and directory role scopes for the post migration script' {
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $request = @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }) | Select-Object -First 1
@@ -3136,7 +3136,7 @@ Context 'The later run: Admin User Group membership' {
     }
 }
 
-Context 'The later run: declared set or nothing' {
+Context 'The post migration script: declared set or nothing' {
     BeforeEach {
         Add-CompliantDirectoryState
         Add-CompliantAzureState
@@ -3207,7 +3207,7 @@ Context 'The later run: declared set or nothing' {
     }
 }
 
-Context 'The first run removes nothing (project#3170)' {
+Context 'The pre migration script removes nothing (project#3170)' {
     It 'keeps every wider grant on a legacy environment and assigns the ten roles' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
@@ -3223,14 +3223,14 @@ Context 'The first run removes nothing (project#3170)' {
         @((Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | ForEach-Object { $_.AppRoleId }) | Should -Contain $script:AppRoleIds['Application.Read.All']
         @((Get-FakeGroup -Id $script:Ids.DevTeamGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.DeploySpId
         Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Set: $script:KitVersion"
-        ($script:Console -join "`n") | Should -Match 'The first run removes nothing'
+        ($script:Console -join "`n") | Should -Match 'The pre migration script removes nothing'
         Should -Invoke Remove-AzRoleAssignment -Times 0
         Should -Invoke Remove-MgDirectoryRoleMemberDirectoryObjectByRef -Times 0
         Should -Invoke Remove-MgServicePrincipalAppRoleAssignment -Times 0
         Should -Invoke Remove-MgGroupMemberByRef -Times 0
     }
 
-    It 'then the later run removes exactly that wider access' {
+    It 'then the post migration script removes exactly that wider access' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.Read.All'
@@ -3245,12 +3245,12 @@ Context 'The first run removes nothing (project#3170)' {
         Get-SummaryResult 'Admin User Group membership' | Should -Match '^HELD'
         Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Already set: $script:KitVersion"
         @($script:Writes | Where-Object { $_ -like 'NEW az role*' }) | Should -HaveCount 0
-        ($script:Console -join "`n") | Should -Match 'The later run is complete'
+        ($script:Console -join "`n") | Should -Match 'The post migration script is complete'
         $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PostWindow_*.json')
         $files | Should -HaveCount 1
     }
 
-    It 'in the later run removes the role assignments on the resource group whose identity no longer exists, and only those' {
+    It 'in the post migration script removes the role assignments on the resource group whose identity no longer exists, and only those' {
         Add-CompliantDirectoryState
         Add-LegacyAzureState
         $gone = [guid]::NewGuid().ToString()
@@ -3264,7 +3264,7 @@ Context 'The first run removes nothing (project#3170)' {
         $script:Tenant.AzRoleAssignments += @{ ObjectId = $goneAtSubscription; ObjectType = 'Unknown'; RoleDefinitionName = 'Reader'; Scope = $script:SubScope }
         $script:Tenant.AzRoleAssignments += @{ ObjectId = $unresolvedButPresent; ObjectType = 'Unknown'; RoleDefinitionName = 'Reader'; Scope = $script:RgScope }
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
-        # The first run removes nothing.
+        # The pre migration script removes nothing.
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $gone }) | Should -HaveCount 2
         $script:Writes = @()
         $script:Summary = @()
@@ -3274,7 +3274,7 @@ Context 'The first run removes nothing (project#3170)' {
         Get-SummaryResult "Orphaned role assignment: Key Vault Secrets User for identity $gone" | Should -Be 'Removed'
         Get-SummaryResult "Orphaned role assignment: Reader for identity $unresolvedButPresent" | Should -Match '^Review'
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $gone }) | Should -HaveCount 0
-        # Inherited from the subscription: never touched by the later run's resource-group sweep.
+        # Inherited from the subscription: never touched by the post migration script's resource-group sweep.
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $goneAtSubscription }) | Should -HaveCount 1
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $unresolvedButPresent }) | Should -HaveCount 1
         Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Already set: $script:KitVersion"
@@ -3295,10 +3295,10 @@ Context 'The first run removes nothing (project#3170)' {
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $gone }) | Should -HaveCount 1
     }
 
-    It 'needs SubscriptionId and ResourceGroupName for the later run with -LaterRun' {
+    It 'needs SubscriptionId and ResourceGroupName for the post migration script with -LaterRun' {
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile -Remove @('SubscriptionId')) }
         $code | Should -Be 1
-        ($script:Console -join "`n") | Should -Match 'The later run with -LaterRun needs SubscriptionId'
+        ($script:Console -join "`n") | Should -Match 'The post migration script with -LaterRun needs SubscriptionId'
         Should -Invoke Connect-MgGraph -Times 0
     }
 
@@ -3335,7 +3335,7 @@ Context 'Log file and summary file on every exit (project#3170)' {
         $json.exitReason | Should -Match 'sign-in to Microsoft Graph did not complete'
         $log = Get-Content -LiteralPath $json.logFile -Raw
         $log | Should -Match 'AADSTS50076'
-        $log | Should -Match 'Neologik environment migration: first run'
+        $log | Should -Match 'Neologik environment migration: pre migration script'
     }
 
     It 'records a failed Microsoft Graph request with its status and request id in the log file' {
@@ -3420,7 +3420,7 @@ Context 'Step 5a: the Azure quotas that the migration needs' {
         Get-SummaryResult 'Model deployments on Foundry' | Should -Match '^Review: the resource group holds no Foundry account'
     }
 
-    It 'checks no quota in the later run' {
+    It 'checks no quota in the post migration script' {
         Add-CompliantPreWindowState
         $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         Should -Invoke Invoke-AzRestMethod -Times 0
@@ -3437,7 +3437,7 @@ Context 'Snapshot, upload and the file list (project#3171)' {
         }
     }
 
-    It 'the first run writes the Pre snapshot and lists the three files' {
+    It 'the pre migration script writes the Pre snapshot and lists the three files' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
@@ -3465,7 +3465,7 @@ Context 'Snapshot, upload and the file list (project#3171)' {
         $script:Uploads | Should -HaveCount 0
     }
 
-    It 'the later run writes the Post snapshot' {
+    It 'the post migration script writes the Post snapshot' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
