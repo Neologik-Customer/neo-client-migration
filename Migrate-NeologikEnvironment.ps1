@@ -168,6 +168,12 @@
           Cognitive Services Content Understanding Contributor on a resource in
           the resource group.
         - Every other directory role and every other group membership.
+        - Contributor on the subscription and on the resource group from the
+          script runner identity, the managed identity that the deployment runs
+          its scripts with, after the script has confirmed Reader on the
+          resource group for that identity. The command names the identity with
+          -ScriptRunnerObjectId. Without the parameter the script leaves the
+          roles of that identity.
 
       Last, the script records the version of the onboarding kit on the resource
       group, in the tag NeologikOnboardingKit.
@@ -290,6 +296,14 @@
     identity. Neologik asks for the later run once the deployment is proven. The
     later run needs SubscriptionId and ResourceGroupName.
 
+.PARAMETER ScriptRunnerObjectId
+    The object id of the script runner identity, the managed identity named
+    'neologik-script-runner-service-connection-<short name>', which the
+    deployment runs its scripts with. The later run gives that identity Reader
+    on the resource group, then removes Contributor on the subscription and on
+    the resource group from that identity. The command from Neologik gives the
+    value. Without the parameter the later run leaves the roles of that identity.
+
 .PARAMETER UploadStorageAccountName
     A storage account of the environment to which the script uploads the files of
     the run when the storage account of the onboarding is not found or does not take
@@ -333,9 +347,9 @@
     The first run with -Verify. The script reports each pending change and writes nothing.
 
 .EXAMPLE
-    ./Migrate-NeologikEnvironment.ps1 -KitVersion v5.0.15 -TenantId <tenant id> -DeploySpClientId <client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <client id> -NceUserGroupId <group id> -AdminGroupId <group id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01 -LaterRun
+    ./Migrate-NeologikEnvironment.ps1 -KitVersion v5.0.15 -TenantId <tenant id> -DeploySpClientId <client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <client id> -NceUserGroupId <group id> -AdminGroupId <group id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01 -LaterRun -ScriptRunnerObjectId <script runner identity object id>
 
-    The later run. The script reduces the access of the deployment identity.
+    The later run. The script reduces the access of the deployment identity and of the script runner identity.
 
 .NOTES
     Requires PowerShell 7.4 or later.
@@ -427,6 +441,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [switch]$LaterRun,
+
+    [Parameter(Mandatory = $false)]
+    [string]$ScriptRunnerObjectId,
 
     [Parameter(Mandatory = $false)]
     [string]$UploadStorageAccountName,
@@ -521,6 +538,14 @@ $script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/
 # Step 6 removes the roles only when the deployment identity holds the roles above.
 $script:LegacySubRoles = @('Contributor', 'User Access Administrator')
 
+# The script runner identity: the managed identity that the deployment runs its
+# scripts with. The identity needs Reader on the resource group beside the roles the
+# onboarding gave it there. An onboarding before kit version 5.0.3 gave the identity
+# Contributor on the subscription and on the resource group instead. Step 6i gives the
+# identity Reader on the resource group, then removes the two Contributor roles.
+$script:ScriptRunnerRequiredRgRoles = @('Reader')
+$script:ScriptRunnerLegacyRole = 'Contributor'
+
 # The deployment identity is not a member of the Admin User Group. The deployment
 # identity reaches SQL as the Microsoft Entra administrator of the SQL server. The
 # deployment by Neologik sets that administrator. The first run removes an existing
@@ -598,7 +623,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.0'
+$script:ScriptVersion = '1.1.1'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -1482,7 +1507,7 @@ function Resolve-NeologikInput {
     param([hashtable]$Parameters)
     $state = $script:State
     foreach ($name in @('KitVersion', 'ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SolutionShortName', 'SolutionName', 'SignInAppClientId', 'SharePointAppClientId',
-            'NceUserGroupId', 'AdminGroupId', 'GuestUsersFile', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey')) {
+            'NceUserGroupId', 'AdminGroupId', 'GuestUsersFile', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'ScriptRunnerObjectId')) {
         $state[$name] = ([string](Get-NeologikProperty $Parameters $name '')).Trim()
     }
     # Agent registrations: one client id for each agent registration. One element can
@@ -1589,7 +1614,8 @@ function Resolve-NeologikInput {
         @{ Name = 'SharePointAppClientId'; Value = $state.SharePointAppClientId },
         @{ Name = 'NceUserGroupId'; Value = $state.NceUserGroupId },
         @{ Name = 'AdminGroupId'; Value = $state.AdminGroupId },
-        @{ Name = 'SubscriptionId'; Value = $state.SubscriptionId })
+        @{ Name = 'SubscriptionId'; Value = $state.SubscriptionId },
+        @{ Name = 'ScriptRunnerObjectId'; Value = $state.ScriptRunnerObjectId })
     foreach ($botId in $state.BotAppClientIds) { $idChecks += @{ Name = 'BotAppClientIds'; Value = $botId } }
     foreach ($idCheck in $idChecks) {
         if ($idCheck.Value -and -not (Test-NeologikGuid $idCheck.Value)) {
@@ -1646,6 +1672,7 @@ function Write-NeologikHeader {
     if ($state.BotAppClientIds.Count -gt 0) { $lines += "  Agent registrations:                        $($state.BotAppClientIds -join ', ')" }
     if ($state.NceUserGroupId) { $lines += "  User group of the Neologik Context Engine:  $($state.NceUserGroupId)" }
     if ($state.AdminGroupId) { $lines += "  Admin User Group:                           $($state.AdminGroupId)" }
+    if ($state.ScriptRunnerObjectId) { $lines += "  Script runner identity:                     $($state.ScriptRunnerObjectId)" }
     $lines += "  Subscription:                               $($state.SubscriptionId)"
     $lines += "  Resource group:                             $($state.ResourceGroupName)"
     if ($script:LogFile) { $lines += "  Log file:                                   $($script:LogFile)" }
@@ -3427,10 +3454,11 @@ function Test-NeologikSubscriptionAdministrator {
 function Set-NeologikAzureRoleAssignment {
     # Assigns one role to the deployment identity at one scope, when the role assignment
     # is absent. Returns $true when the deployment identity holds the role assignment.
-    param([string]$RoleName, [string]$Scope, [string]$Label)
-    $deploySp = $script:State.DeploySp
+    # -ObjectId names another identity, the script runner identity of step 6i.
+    param([string]$RoleName, [string]$Scope, [string]$Label, [string]$ObjectId = '')
+    if (-not $ObjectId) { $ObjectId = $script:State.DeploySp.Id }
     try {
-        $assignment = @(Get-AzRoleAssignment -ObjectId $deploySp.Id -RoleDefinitionName $RoleName -Scope $Scope -ErrorAction Stop |
+        $assignment = @(Get-AzRoleAssignment -ObjectId $ObjectId -RoleDefinitionName $RoleName -Scope $Scope -ErrorAction Stop |
             Where-Object { $_.Scope -eq $Scope })
         if ($assignment.Count -gt 0) {
             Write-Log "  $Label role '$RoleName': already assigned" -Level Success
@@ -3444,7 +3472,7 @@ function Set-NeologikAzureRoleAssignment {
             return $true
         }
         try {
-            Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{ ObjectId = $deploySp.Id; RoleDefinitionName = $RoleName; Scope = $Scope } | Out-Null
+            Invoke-NeologikWrite -Command 'New-AzRoleAssignment' -Parameters @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleName; Scope = $Scope } | Out-Null
         }
         catch {
             if ((Get-NeologikErrorText $_) -match '(?i)RoleAssignmentExists|already exists') {
@@ -3590,10 +3618,12 @@ function Set-NeologikLimitedAzureRoleAssignment {
 }
 
 function Remove-NeologikAzureRoleAssignment {
-    param([string]$RoleName, [string]$Scope, [string]$Label)
-    $deploySp = $script:State.DeploySp
+    # Removes one role from the deployment identity at one scope. -ObjectId names another
+    # identity, the script runner identity of step 6i.
+    param([string]$RoleName, [string]$Scope, [string]$Label, [string]$ObjectId = '')
+    if (-not $ObjectId) { $ObjectId = $script:State.DeploySp.Id }
     try {
-        $assignment = @(Get-AzRoleAssignment -ObjectId $deploySp.Id -RoleDefinitionName $RoleName -Scope $Scope -ErrorAction Stop |
+        $assignment = @(Get-AzRoleAssignment -ObjectId $ObjectId -RoleDefinitionName $RoleName -Scope $Scope -ErrorAction Stop |
             Where-Object { $_.Scope -eq $Scope })
         if ($assignment.Count -eq 0) {
             Write-Log "  $Label role '$RoleName': not held. The script removes nothing" -Level Success
@@ -3604,7 +3634,7 @@ function Remove-NeologikAzureRoleAssignment {
             Add-NeologikPendingChange "$Label role to remove: $RoleName" 'REMOVE'
             return
         }
-        Invoke-NeologikWrite -Command 'Remove-AzRoleAssignment' -Parameters @{ ObjectId = $deploySp.Id; RoleDefinitionName = $RoleName; Scope = $Scope } | Out-Null
+        Invoke-NeologikWrite -Command 'Remove-AzRoleAssignment' -Parameters @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleName; Scope = $Scope } | Out-Null
         Write-Log "  $Label role '$RoleName': removed" -Level Success
         Add-Summary "$Label role to remove: $RoleName" 'Removed'
     }
@@ -3948,7 +3978,7 @@ function Remove-NeologikUndeclaredGroupMembership {
 }
 
 function Set-NeologikKitVersionTag {
-    # Step 5 of the first run and step 6h of the later run: the version of the onboarding
+    # Step 5 of the first run and step 6j of the later run: the version of the onboarding
     # kit that -KitVersion names, in the tag NeologikOnboardingKit on the
     # resource group. The Neologik Platform reads the tag before an upgrade. The function
     # writes the tag last, merges the tag with the existing tags, and writes only a
@@ -3979,6 +4009,45 @@ function Set-NeologikKitVersionTag {
         Write-Log "  ${label}: FAILED. $reason" -Level Error
         Add-Summary $label "FAILED: $reason"
     }
+}
+
+function Get-NeologikScriptRunnerItem {
+    # The summary items of step 6i, for the rows the step skips as one.
+    $items = @()
+    foreach ($roleName in $script:ScriptRunnerRequiredRgRoles) { $items += "Script runner identity resource group role: $roleName" }
+    $items += "Script runner identity subscription role to remove: $($script:ScriptRunnerLegacyRole)"
+    $items += "Script runner identity resource group role to remove: $($script:ScriptRunnerLegacyRole)"
+    return $items
+}
+
+function Remove-NeologikScriptRunnerWideRole {
+    <#
+    Step 6i of the later run: the script runner identity, the managed identity that the
+    deployment runs its scripts with. The function gives the identity Reader on the
+    resource group, then removes Contributor on the subscription and on the resource
+    group. The function removes nothing unless the identity holds Reader. The function
+    does nothing when the command does not name the identity.
+    #>
+    $state = $script:State
+    $objectId = [string](Get-NeologikProperty $state 'ScriptRunnerObjectId' '')
+    if (-not $objectId) {
+        Write-Log '  The command does not name the script runner identity. The script leaves the roles of that identity' -Level Info
+        return
+    }
+    $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
+    $subScope = "/subscriptions/$($state.SubscriptionId)"
+    $held = $true
+    foreach ($roleName in $script:ScriptRunnerRequiredRgRoles) {
+        if (-not (Set-NeologikAzureRoleAssignment -RoleName $roleName -Scope $rgScope -Label 'Script runner identity resource group' -ObjectId $objectId)) { $held = $false }
+    }
+    if (-not $held) {
+        Write-Log '  The script runner identity does not hold Reader on the resource group. The script removes no role from that identity' -Level Warning
+        Add-Summary "Script runner identity subscription role to remove: $($script:ScriptRunnerLegacyRole)" 'SKIPPED: the script runner identity does not hold Reader on the resource group'
+        Add-Summary "Script runner identity resource group role to remove: $($script:ScriptRunnerLegacyRole)" 'SKIPPED: the script runner identity does not hold Reader on the resource group'
+        return
+    }
+    Remove-NeologikAzureRoleAssignment -RoleName $script:ScriptRunnerLegacyRole -Scope $subScope -Label 'Script runner identity subscription' -ObjectId $objectId
+    Remove-NeologikAzureRoleAssignment -RoleName $script:ScriptRunnerLegacyRole -Scope $rgScope -Label 'Script runner identity resource group' -ObjectId $objectId
 }
 
 function Set-NeologikDeploymentAzureRole {
@@ -4041,6 +4110,7 @@ function Invoke-NeologikPermissionReduction {
     $held = Set-NeologikDeploymentAzureRole -StepLabel 'Step 6 of 6: the permission reduction of the deployment identity' -ApplyLimit
     $reductionItems = @()
     foreach ($roleName in $script:LegacySubRoles) { $reductionItems += "Subscription role to remove: $roleName" }
+    if ($state.ScriptRunnerObjectId) { $reductionItems += Get-NeologikScriptRunnerItem }
     $reductionItems += @('Application Administrator role', 'Admin User Group membership', 'Other Azure roles', 'Other directory roles', 'Other group memberships', 'Orphaned role assignments')
     if (-not $state.AzureConnected) {
         foreach ($item in $reductionItems) { Add-Summary $item 'SKIPPED: the script did not confirm the Azure roles of the deployment identity' }
@@ -4078,7 +4148,11 @@ function Invoke-NeologikPermissionReduction {
     # gone, left by the identities that the migration retired.
     Remove-NeologikOrphanedRoleAssignment
 
-    # Step 6i: record the version of the onboarding kit, after every step above.
+    # Step 6i: the script runner identity. Reader on the resource group, then the removal
+    # of Contributor on the subscription and on the resource group.
+    Remove-NeologikScriptRunnerWideRole
+
+    # Step 6j: record the version of the onboarding kit, after every step above.
     Set-NeologikKitVersionTag -ResourceId $rgScope
 }
 
@@ -4834,6 +4908,7 @@ function Invoke-NeologikEnvironmentMigration {
         [string]$ResourceGroupName,
         [string]$BlueprintKey = 'default',
         [switch]$LaterRun,
+        [string]$ScriptRunnerObjectId,
         [string]$UploadStorageAccountName,
         [switch]$UseAzureCliToken
     )
@@ -4873,6 +4948,7 @@ function Invoke-NeologikEnvironmentMigration {
             ResourceGroupName       = $ResourceGroupName
             BlueprintKey            = $BlueprintKey
             LaterRun                = [bool]$LaterRun
+            ScriptRunnerObjectId    = $ScriptRunnerObjectId
             UploadStorageAccountName = $UploadStorageAccountName
             UseAzureCliToken        = [bool]$UseAzureCliToken
         }
