@@ -163,6 +163,10 @@ BeforeAll {
             Users                 = @()
             DirectoryRoles        = @()
             AzRoleAssignments     = @()
+            StaleAzRoleAssignments = @()
+            StaleAzRoleReads      = 0
+            # how many reads after a removal still show the removed assignment
+            StaleAzRoleReadsAfterRemoval = 0
             PageSize              = 0
             PrincipalCreateDelays = 0
             GrantRefusals         = @()
@@ -400,6 +404,13 @@ BeforeAll {
         $json = $null
         if ($Body) { $json = $Body | ConvertFrom-Json -AsHashtable }
         switch -Regex ($path) {
+            '^/directoryObjects/([^/]+)$' {
+                # Any object of the directory by id: a user, a group or a service principal.
+                $id = $Matches[1]
+                $known = @($t.ServicePrincipals | ForEach-Object { $_.id }) + @($t.Groups | ForEach-Object { $_.id }) + @($t.Users | ForEach-Object { $_.id }) + @($t.Me)
+                if ($known -contains $id) { return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $id } } }
+                return @{ StatusCode = 404; Headers = @{}; Body = @{ error = @{ code = 'Request_ResourceNotFound'; message = 'not found' } } }
+            }
             '^/me$' { return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $t.Me; userPrincipalName = 'admin@contoso.com'; displayName = 'Contoso Administrator' } } }
             '^/me/memberOf/microsoft\.graph\.directoryRole$' {
                 return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items @($t.MeDirectoryRoles) -Uri $Uri -Query $query) }
@@ -710,6 +721,13 @@ BeforeAll {
         }
         return @{ StatusCode = 200; Body = @{ access_token = 'eyJ0b2tlbg'; refresh_token = 'rt-1' } }
     }
+    # The browser sign-in: by default no browser opens, so a run falls back to the
+    # device code above. The context 'Browser sign-in' opens the browser.
+    Mock Start-NeologikLoopbackListener {
+        [pscustomobject]@{ Port = 50999 } | Add-Member -MemberType ScriptMethod -Name Stop -Value { } -PassThru
+    }
+    Mock Open-NeologikBrowser { param($Uri) $script:BrowserUris += $Uri; $script:BrowserOpens }
+    Mock Test-NeologikDesktop { $script:Desktop }
     Mock Get-NeologikSummaryDirectory { @($script:SummaryDirs) }
     Mock Get-NeologikGuestUsersFileDefault { $script:GuestFile }
     # The storage account of the environment (project#3171): the first
@@ -870,11 +888,23 @@ BeforeAll {
     Mock Get-AzRoleAssignment {
         param($ObjectId, $RoleDefinitionName, $Scope)
         # Azure returns the assignment at the scope and every inherited one above it.
-        @($script:Tenant.AzRoleAssignments | Where-Object {
-                $_.ObjectId -eq $ObjectId -and
+        # Without -ObjectId it returns every principal's assignments. An assignment
+        # whose principal is gone from the directory reads ObjectType Unknown, as Azure
+        # reports it; every other reads ServicePrincipal.
+        $visible = @($script:Tenant.AzRoleAssignments)
+        if ([int]$script:Tenant.StaleAzRoleReads -gt 0) {
+            $script:Tenant.StaleAzRoleReads--
+            $visible += @($script:Tenant.StaleAzRoleAssignments)
+        }
+        @($visible | Where-Object {
+                ((-not $ObjectId) -or $_.ObjectId -eq $ObjectId) -and
                 ((-not $RoleDefinitionName) -or $_.RoleDefinitionName -eq $RoleDefinitionName) -and
                 ((-not $Scope) -or $Scope.StartsWith($_.Scope, [System.StringComparison]::OrdinalIgnoreCase))
-            } | ForEach-Object { [pscustomobject]$_ })
+            } | ForEach-Object {
+                $entry = @{} + $_
+                if (-not $entry.ContainsKey('ObjectType')) { $entry.ObjectType = 'ServicePrincipal' }
+                [pscustomobject]$entry
+            })
     }
     Mock New-AzRoleAssignment {
         param($ObjectId, $RoleDefinitionName, $RoleDefinitionId, $Scope, $Condition, $ConditionVersion)
@@ -897,8 +927,14 @@ BeforeAll {
     }
     Mock Remove-AzRoleAssignment {
         param($ObjectId, $RoleDefinitionName, $Scope)
+        # Azure answers reads with a removed assignment for a while: the model keeps the
+        # removed entries in StaleAzRoleAssignments, and Get-AzRoleAssignment returns them
+        # for StaleAzRoleReads more reads.
+        $script:Tenant.StaleAzRoleAssignments += @($script:Tenant.AzRoleAssignments | Where-Object {
+                $_.ObjectId -eq $ObjectId -and $_.RoleDefinitionName -eq $RoleDefinitionName -and $_.Scope -eq $Scope })
         $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object {
                 -not ($_.ObjectId -eq $ObjectId -and $_.RoleDefinitionName -eq $RoleDefinitionName -and $_.Scope -eq $Scope) })
+        $script:Tenant.StaleAzRoleReads = [int]$script:Tenant.StaleAzRoleReadsAfterRemoval
         Add-Write "REMOVE az role $RoleDefinitionName $Scope"
     }
 }
@@ -913,6 +949,9 @@ BeforeEach {
     $script:Installs = @()
     $script:Imports = @()
     $script:TokenRequests = @()
+    $script:BrowserUris = @()
+    $script:BrowserOpens = $false
+    $script:Desktop = $false
     $script:Connected = $false
     $script:AzConnected = $false
     $script:ContextTenant = $script:Ids.Tenant
@@ -1292,7 +1331,7 @@ Context 'Sign-in and preflight' {
         # Bounded: polled at once and after each of the twelve 10-second waits, never more.
         @($script:TokenRequests | Where-Object { $_.Uri -match '/token$' }).Count | Should -Be 13
         ($script:Sleeps | Measure-Object -Sum).Sum | Should -Be 120
-        $console | Should -Match 'The sign-in to Microsoft Graph did not complete\. The script tried three methods'
+        $console | Should -Match 'The sign-in to Microsoft Graph did not complete\. The script tried four methods'
         Should -Invoke Get-MgServicePrincipal -Times 0
     }
 
@@ -1381,6 +1420,176 @@ Context 'Sign-in and preflight' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         ($script:Console -join "`n") | Should -Match 'holds User Access Administrator on the subscription'
+    }
+}
+
+Context 'Browser sign-in' {
+    BeforeAll {
+        # An access token that names the account admin@contoso.com. The script reads the
+        # claims and never checks the signature.
+        $claims = ConvertTo-NeologikBase64Url ([System.Text.Encoding]::UTF8.GetBytes('{"upn":"admin@contoso.com"}'))
+        $script:AdminJwt = "eyJhbGciOiJub25lIn0.$claims.sig"
+        function Get-BrowserQuery {
+            # The parameters of the sign-in address that the script opened, by position.
+            param([int]$Index)
+            ConvertFrom-NeologikQueryString ($script:BrowserUris[$Index].Split('?', 2)[1])
+        }
+    }
+
+    BeforeEach {
+        $script:BrowserOpens = $true
+        # The browser returns the code with the state of the address that the script opened.
+        Mock Wait-NeologikLoopbackRequest {
+            param($Listener, $TimeoutSeconds, $Label)
+            $query = Get-BrowserQuery -Index ($script:BrowserUris.Count - 1)
+            @{ code = "code-$Label"; state = $query.state }
+        }
+        Mock Invoke-NeologikTokenRequest {
+            param($Uri, $Body)
+            $script:TokenRequests += @{ Uri = $Uri; Body = $Body }
+            if ($Uri -match '/devicecode$') {
+                return @{ StatusCode = 200; Body = @{ device_code = 'dc-1'; user_code = 'ABCD-EFGH'; verification_uri = 'https://microsoft.com/devicelogin'; expires_in = 900; interval = 5 } }
+            }
+            return @{ StatusCode = 200; Body = @{ access_token = $script:AdminJwt; refresh_token = 'rt-1' } }
+        }
+    }
+
+    It 'signs in to Graph and Azure in the browser first and asks for no device code' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }).Count | Should -Be 0
+        $script:BrowserUris | Should -HaveCount 2
+
+        $graphUri = $script:BrowserUris[0]
+        $graphUri | Should -Match "^https://login\.microsoftonline\.com/$($script:Ids.Tenant)/oauth2/v2\.0/authorize\?"
+        $graphQuery = Get-BrowserQuery -Index 0
+        $graphQuery.client_id | Should -Be '14d82eec-204b-4c2f-b7e8-296a70dab67e'
+        $graphQuery.redirect_uri | Should -Be 'http://localhost:50999/'
+        $graphQuery.code_challenge_method | Should -Be 'S256'
+        $graphQuery.prompt | Should -Be 'select_account'
+        @($graphQuery.scope -split ' ') | Should -Contain 'Directory.Read.All'
+        $graphToken = @($script:TokenRequests | Where-Object { $_.Body.client_id -eq '14d82eec-204b-4c2f-b7e8-296a70dab67e' }) | Select-Object -First 1
+        $graphToken.Uri | Should -Match '/token$'
+        $graphToken.Body.grant_type | Should -Be 'authorization_code'
+        $graphToken.Body.code | Should -Be 'code-Microsoft Graph'
+        $graphToken.Body.redirect_uri | Should -Be 'http://localhost:50999/'
+        # The proof key: the challenge in the address is the hash of the verifier in the token request.
+        $hash = [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::ASCII.GetBytes($graphToken.Body.code_verifier))
+        $graphQuery.code_challenge | Should -Be (ConvertTo-NeologikBase64Url $hash)
+
+        # Azure asks for the claim that a role assignment needs and names the account of the
+        # Graph sign-in, so the browser does not ask again.
+        $azureQuery = Get-BrowserQuery -Index 1
+        $azureQuery.client_id | Should -Be '1950a258-227b-4e31-a9cf-717495945fc2'
+        $azureQuery.claims | Should -Match '"p1"'
+        $azureQuery.login_hint | Should -Be 'admin@contoso.com'
+        $azureQuery.ContainsKey('prompt') | Should -BeFalse
+        $azureQuery.state | Should -Not -Be $graphQuery.state
+
+        Should -Invoke Connect-MgGraph -Times 1 -ParameterFilter { $AccessToken -is [securestring] -and -not $UseDeviceCode }
+        Should -Invoke Connect-AzAccount -Times 1 -ParameterFilter { $AccessToken -eq $script:AdminJwt -and $AccountId -eq 'admin@contoso.com' -and -not $UseDeviceAuthentication }
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'opens the sign-in page in the browser of this computer'
+        $console | Should -Not -Match 'Enter the code'
+        $console | Should -Not -Match ([regex]::Escape($script:AdminJwt))
+    }
+
+    It 'falls back to the device code when the browser sign-in does not complete in time' {
+        Add-CompliantPreWindowState
+        Mock Wait-NeologikLoopbackRequest { $null }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'The sign-in to Microsoft Graph in the browser did not complete within 5 minutes'
+        $console | Should -Match 'Enter the code: ABCD-EFGH'
+        @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }).Count | Should -Be 2
+    }
+
+    It 'falls back to the device code when no browser opens' {
+        Add-CompliantPreWindowState
+        $script:BrowserOpens = $false
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        ($script:Console -join "`n") | Should -Match 'The sign-in to Microsoft Graph in the browser did not start\. The script tries a device code'
+        Should -Invoke Wait-NeologikLoopbackRequest -Times 0
+    }
+
+    It 'names a Conditional Access refusal in the browser and falls back to the device code' {
+        Add-CompliantPreWindowState
+        Mock Wait-NeologikLoopbackRequest {
+            $query = Get-BrowserQuery -Index ($script:BrowserUris.Count - 1)
+            @{ error = 'access_denied'; error_description = 'AADSTS53003: Access has been blocked by Conditional Access policies.'; state = $query.state }
+        }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        ($script:Console -join "`n") | Should -Match 'A Conditional Access policy of the tenant refused the sign-in to Microsoft Graph with the browser\. AADSTS53003'
+        @($script:TokenRequests | Where-Object { $_.Body.grant_type -eq 'authorization_code' }).Count | Should -Be 0
+        @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' }).Count | Should -Be 2
+    }
+
+    It 'ignores an answer whose state this run did not request' {
+        Add-CompliantPreWindowState
+        Mock Wait-NeologikLoopbackRequest { @{ code = 'code-other'; state = 'another-state' } }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        ($script:Console -join "`n") | Should -Match 'returned an answer that this run did not request'
+        @($script:TokenRequests | Where-Object { $_.Body.grant_type -eq 'authorization_code' }).Count | Should -Be 0
+    }
+
+    It 'names a Conditional Access refusal of the device code and tries the next method at once' {
+        Add-CompliantPreWindowState
+        $script:BrowserOpens = $false
+        Mock Invoke-NeologikTokenRequest {
+            param($Uri, $Body)
+            if ($Uri -match '/devicecode$') {
+                return @{ StatusCode = 200; Body = @{ device_code = 'dc-1'; user_code = 'ABCD-EFGH'; verification_uri = 'https://microsoft.com/devicelogin'; expires_in = 900; interval = 5 } }
+            }
+            return @{ StatusCode = 400; Body = @{ error = 'invalid_grant'; error_codes = @(53003); error_description = 'AADSTS53003: Access has been blocked by Conditional Access policies.' } }
+        }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'A Conditional Access policy of the tenant refused the sign-in to Microsoft Graph with a device code'
+        $console | Should -Match 'The script now tries the Azure CLI session of this workstation'
+        ($script:Sleeps | Measure-Object -Sum).Sum | Should -Be 0
+    }
+}
+
+Context 'Browser sign-in: the loopback listener' {
+    It 'reads the result of the sign-in from a real loopback request and answers the browser' {
+        # The real listener: the default mock replaces the command name, not the function.
+        $listener = & (Get-Command -Name Start-NeologikLoopbackListener -CommandType Function)
+        $http = [System.Net.Http.HttpClient]::new()
+        try {
+            $task = $http.GetAsync("http://localhost:$($listener.Port)/?code=abc%2B1&state=xyz")
+            $query = Wait-NeologikLoopbackRequest -Listener $listener -TimeoutSeconds 10 -Label 'Test'
+            $query.code | Should -Be 'abc+1'
+            $query.state | Should -Be 'xyz'
+            $response = $task.GetAwaiter().GetResult()
+            [int]$response.StatusCode | Should -Be 200
+            $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() | Should -Match 'The sign-in is complete\. Return to the PowerShell window\.'
+        }
+        finally {
+            $listener.Stop()
+            $http.Dispose()
+        }
+    }
+
+    It 'answers a request with no result with 404 and gives up when the time ends' {
+        # The real listener: the default mock replaces the command name, not the function.
+        $listener = & (Get-Command -Name Start-NeologikLoopbackListener -CommandType Function)
+        $http = [System.Net.Http.HttpClient]::new()
+        try {
+            $task = $http.GetAsync("http://localhost:$($listener.Port)/favicon.ico")
+            $query = Wait-NeologikLoopbackRequest -Listener $listener -TimeoutSeconds 2 -Label 'Test'
+            $query | Should -BeNullOrEmpty
+            [int]($task.GetAwaiter().GetResult().StatusCode) | Should -Be 404
+        }
+        finally {
+            $listener.Stop()
+            $http.Dispose()
+        }
     }
 }
 
@@ -2243,9 +2452,87 @@ Context 'The later run: permission reduction (step 6)' {
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Limit applied'
-        Should -Invoke Set-AzRoleAssignment -Times 1
-        @($script:Writes | Where-Object { $_ -like 'LIMIT az role Role Based Access Control Administrator *' }) | Should -HaveCount 1
-        @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })[0].Condition | Should -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+        # Azure keeps the condition of an assignment on an update, so the later run removes
+        # the assignment and creates it again with the limit; it never updates in place.
+        Should -Invoke Set-AzRoleAssignment -Times 0
+        Should -Invoke Remove-AzRoleAssignment -Times 1
+        @($script:Writes | Where-Object { $_ -like 'REMOVE az role Role Based Access Control Administrator *' }) | Should -HaveCount 1
+        @($script:Writes | Where-Object { $_ -like 'NEW az role Role Based Access Control Administrator * limited' }) | Should -HaveCount 1
+        $limited = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $limited | Should -HaveCount 1
+        $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
+        $limited[0].Condition | Should -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
+    }
+
+    It 'in the later run replaces a limited assignment that carries the two-role condition with the three-role condition' {
+        Add-CompliantPreWindowState
+        $twoRole = $script:LimitedSubRoleCondition -replace ', 72fafb9e-0641-4937-9268-a91bfd8191a3', ''
+        $twoRole | Should -Not -Be $script:LimitedSubRoleCondition
+        foreach ($entry in $script:Tenant.AzRoleAssignments) {
+            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Condition = $twoRole }
+        }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Limit applied'
+        Should -Invoke Set-AzRoleAssignment -Times 0
+        @($script:Writes | Where-Object { $_ -like 'REMOVE az role Role Based Access Control Administrator *' }) | Should -HaveCount 1
+        @($script:Writes | Where-Object { $_ -like 'NEW az role Role Based Access Control Administrator * limited' }) | Should -HaveCount 1
+        $limited = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $limited | Should -HaveCount 1
+        $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
+    }
+
+    It 'in the later run waits until Azure no longer shows the removed assignment before creating the limited one' {
+        Add-CompliantPreWindowState
+        foreach ($entry in $script:Tenant.AzRoleAssignments) {
+            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
+        }
+        $script:Tenant.StaleAzRoleReadsAfterRemoval = 3
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Limit applied'
+        @($script:Sleeps | Where-Object { $_ -eq 5 }) | Should -HaveCount 3
+        $script:Tenant.StaleAzRoleReads | Should -Be 0
+        @($script:Writes | Where-Object { $_ -like 'REMOVE az role Role Based Access Control Administrator *' }) | Should -HaveCount 1
+        @($script:Writes | Where-Object { $_ -like 'NEW az role Role Based Access Control Administrator * limited' }) | Should -HaveCount 1
+        $limited = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $limited | Should -HaveCount 1
+        $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
+    }
+
+    It 'in the later run tries the create again when Azure answers "already exists" for the removed assignment' {
+        Add-CompliantPreWindowState
+        foreach ($entry in $script:Tenant.AzRoleAssignments) {
+            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
+        }
+        $script:CreateRefusals = 2
+        Mock New-AzRoleAssignment {
+            param($ObjectId, $RoleDefinitionName, $RoleDefinitionId, $Scope, $Condition, $ConditionVersion)
+            if ($script:CreateRefusals -gt 0) { $script:CreateRefusals--; throw 'RoleAssignmentExists: The role assignment already exists.' }
+            $script:Tenant.AzRoleAssignments += @{ ObjectId = $ObjectId; RoleDefinitionName = $script:LimitedSubRole; Scope = $Scope; Condition = $Condition; ConditionVersion = $ConditionVersion }
+            Add-Write "NEW az role $($script:LimitedSubRole) $Scope limited"
+        }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'Limit applied'
+        $script:CreateRefusals | Should -Be 0
+        @($script:Sleeps | Where-Object { $_ -eq 10 }) | Should -HaveCount 2
+        @($script:Writes | Where-Object { $_ -like 'NEW az role Role Based Access Control Administrator * limited' }) | Should -HaveCount 1
+        $limited = @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq $script:LimitedSubRole -and $_.Scope -eq $script:SubScope })
+        $limited | Should -HaveCount 1
+        $limited[0].Condition | Should -Be $script:LimitedSubRoleCondition
+    }
+
+    It 'in the later run with -Verify reports the limit as a pending change and removes nothing' {
+        Add-CompliantPreWindowState
+        foreach ($entry in $script:Tenant.AzRoleAssignments) {
+            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Remove('Condition'); $entry.Remove('ConditionVersion') }
+        }
+        $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); Verify = $true }
+        Get-SummaryResult 'Subscription role: Role Based Access Control Administrator (limited)' | Should -Be 'WOULD APPLY THE LIMIT'
+        Should -Invoke Remove-AzRoleAssignment -Times 0
+        Should -Invoke New-AzRoleAssignment -Times 0
+        Should -Invoke Set-AzRoleAssignment -Times 0
     }
 
     It 'with -Verify reports the limited role as WOULD ASSIGN and writes nothing' {
@@ -2857,6 +3144,51 @@ Context 'The first run removes nothing (project#3170)' {
         ($script:Console -join "`n") | Should -Match 'The later run is complete'
         $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PostWindow_*.json')
         $files | Should -HaveCount 1
+    }
+
+    It 'in the later run removes the role assignments on the resource group whose identity no longer exists, and only those' {
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        $gone = [guid]::NewGuid().ToString()
+        $goneAtSubscription = [guid]::NewGuid().ToString()
+        # An assignment whose identity Azure cannot resolve but the directory still holds:
+        # the Dev Team group's id stands in for such an identity.
+        $unresolvedButPresent = $script:Ids.DevTeamGroup
+        $script:Tenant.Groups += @{ id = $script:Ids.DevTeamGroup; displayName = 'Neologik Dev Team'; members = @(); appRoleAssignments = @() }
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $gone; ObjectType = 'Unknown'; RoleDefinitionName = 'Contributor'; Scope = $script:RgScope }
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $gone; ObjectType = 'Unknown'; RoleDefinitionName = 'Key Vault Secrets User'; Scope = $script:RgScope }
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $goneAtSubscription; ObjectType = 'Unknown'; RoleDefinitionName = 'Reader'; Scope = $script:SubScope }
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $unresolvedButPresent; ObjectType = 'Unknown'; RoleDefinitionName = 'Reader'; Scope = $script:RgScope }
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        # The first run removes nothing.
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $gone }) | Should -HaveCount 2
+        $script:Writes = @()
+        $script:Summary = @()
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult "Orphaned role assignment: Contributor for identity $gone" | Should -Be 'Removed'
+        Get-SummaryResult "Orphaned role assignment: Key Vault Secrets User for identity $gone" | Should -Be 'Removed'
+        Get-SummaryResult "Orphaned role assignment: Reader for identity $unresolvedButPresent" | Should -Match '^Review'
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $gone }) | Should -HaveCount 0
+        # Inherited from the subscription: never touched by the later run's resource-group sweep.
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $goneAtSubscription }) | Should -HaveCount 1
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $unresolvedButPresent }) | Should -HaveCount 1
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Already set: $script:KitVersion"
+    }
+
+    It 'reports the orphaned role assignments as pending in a run with -Verify and removes nothing' {
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        $gone = [guid]::NewGuid().ToString()
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $gone; ObjectType = 'Unknown'; RoleDefinitionName = 'Contributor'; Scope = $script:RgScope }
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $script:Writes = @()
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $gone; ObjectType = 'Unknown'; RoleDefinitionName = 'Contributor'; Scope = $script:RgScope }
+        $code = Invoke-Run @{ LaterRun = $true; Verify = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        @($script:Writes | Where-Object { $_ -like 'REMOVE az role*' }) | Should -HaveCount 0
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $gone }) | Should -HaveCount 1
     }
 
     It 'needs SubscriptionId and ResourceGroupName for the later run with -LaterRun' {

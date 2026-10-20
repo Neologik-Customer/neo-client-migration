@@ -20,7 +20,7 @@ The migration script moves one existing Neologik Platform environment to version
 | Subject | Position |
 |---|---|
 | Resource group | Seven roles: Contributor, Key Vault Certificates Officer, Key Vault Secrets Officer, Storage Blob Data Contributor, Azure Kubernetes Service RBAC Cluster Admin, Monitoring Contributor and Role Based Access Control Administrator |
-| Subscription | Three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited by a condition to assigning two roles, Reader and AppGw for Containers Configuration Manager. None of the three allows a change to an Azure resource |
+| Subscription | Three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited by a condition to assigning three roles, Reader, AppGw for Containers Configuration Manager and Cost Management Reader. None of the three allows a change to an Azure resource |
 | A resource in the resource group | Cognitive Services Content Understanding Contributor on the Content Understanding account, granted by the deployment |
 | Microsoft Graph | Two application permissions: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Entra ID | No directory role and no group membership |
@@ -46,9 +46,10 @@ The migration script makes two sign-ins. Both sign-ins use the account of the ad
 
 | Subject | Detail |
 |---|---|
-| Method | A device code that the migration script requests from the Microsoft identity platform with the public client id of Microsoft Graph Command Line Tools. The administrator opens the address, enters the code and signs in |
-| Second method | The Azure CLI session of the workstation, when the workstation has one for the tenant |
-| Third method | The device code prompt of Microsoft Graph PowerShell |
+| Method | A sign-in in the browser of the workstation, with an authorisation code, a proof key and a listener on the loopback address of the workstation, with the public client id of Microsoft Graph Command Line Tools |
+| Second method | A device code that the migration script requests from the Microsoft identity platform. The administrator opens the address, enters the code and signs in |
+| Third method | The Azure CLI session of the workstation, when the workstation has one for the tenant |
+| Fourth method | The device code prompt of Microsoft Graph PowerShell |
 | Check after the sign-in | The session is for the tenant that the command names. The signed-in account holds an active Global Administrator role. A run that writes stops otherwise |
 
 The sign-in requests delegated permissions only. A delegated permission works only while the administrator is signed in, as the administrator.
@@ -73,9 +74,10 @@ The sign-in requests delegated permissions only. A delegated permission works on
 
 | Subject | Detail |
 |---|---|
-| Method | A device code that the migration script requests with the public client id of Microsoft Azure PowerShell. The request carries the multi-factor authentication claim, because Azure requires the claim for a role assignment. The same sign-in gives the Azure session a token for Microsoft Graph, through the refresh token, because the role assignment commands of Az PowerShell read each principal from Microsoft Graph. The session is opened in an Az context store of the run's own, empty, so a sign-in saved on the workstation by an earlier script takes no part. The saved sign-ins are not changed |
-| Second method | The Azure CLI session of the workstation |
-| Third method | The device code prompt of Az PowerShell |
+| Method | A sign-in in the browser of the workstation with the public client id of Microsoft Azure PowerShell, naming the account of the Microsoft Graph sign-in. The request carries the multi-factor authentication claim, because Azure requires the claim for a role assignment. The same sign-in gives the Azure session a token for Microsoft Graph, through the refresh token, because the role assignment commands of Az PowerShell read each principal from Microsoft Graph. The session is opened in an Az context store of the run's own, empty, so a sign-in saved on the workstation by an earlier script takes no part. The saved sign-ins are not changed |
+| Second method | A device code that the migration script requests, with the same claim. The device code gives the Azure session the token for Microsoft Graph in the same way |
+| Third method | The Azure CLI session of the workstation |
+| Fourth method | The device code prompt of Az PowerShell |
 | Check after the sign-in | The session selected the subscription that the command names. The signed-in account holds Owner or User Access Administrator on the subscription. A run that writes stops otherwise |
 | Purpose | The role assignments of the deployment identity, the tag on the resource group, the read of the SQL server administrators, and the upload of the files of the run |
 | Upload of the files | A token for Azure Storage from the same sign-in, obtained with its refresh token, or from the Azure CLI with `-UseAzureCliToken`. The files go into the storage account directly, over HTTPS, with the data role Storage Blob Data Contributor of the signed-in administrator |
@@ -105,7 +107,7 @@ The migration script checks each input before the first sign-in: each id is a GU
 | 4 | First | The administrator consent of the Platform Sign-in application (read only). The SharePoint consent. The ownership and the unique names of the application registrations that the command names |
 | 5 | First | The sign-in to Azure. The ten Azure roles of the deployment identity. The tag `NeologikOnboardingKit` on the resource group |
 | 5a | First | The Azure quotas that the migration needs, in the region of the environment: App Service Y1 instances, the vCPUs of the node pool family and of the region against the growth of the cluster, and the regional Azure OpenAI quota of each model that the Foundry account lacks. Read only |
-| 6 | Later | The two Microsoft Graph application permissions, then the removal of the seven retired ones. The sign-in to Azure. The ten Azure roles. The removal of Contributor and User Access Administrator on the subscription, the directory role Application Administrator, the membership of the Admin User Group, every other Azure role, directory role and group membership. The tag `NeologikOnboardingKit` |
+| 6 | Later | The two Microsoft Graph application permissions, then the removal of the seven retired ones. The sign-in to Azure. The ten Azure roles. The removal of Contributor and User Access Administrator on the subscription, the directory role Application Administrator, the membership of the Admin User Group, every other Azure role, directory role and group membership. The removal of every role assignment on the resource group whose identity is gone from Microsoft Entra ID. The tag `NeologikOnboardingKit` |
 | Close | Both | The snapshot file, the summary table and the summary file, the upload, the list of files |
 
 ## Directory writes
@@ -137,8 +139,9 @@ The migration script removes no member other than the deployment identity. The m
 | Write | Run | Object |
 |---|---|---|
 | Role assignment | First and later | Each of the seven roles on the resource group and the two roles on the subscription that the deployment identity lacks |
-| Role assignment with condition | First and later | Role Based Access Control Administrator on the subscription, limited to assigning Reader and AppGw for Containers Configuration Manager. The later run writes the condition onto an assignment that lacks it |
+| Role assignment with condition | First and later | Role Based Access Control Administrator on the subscription, limited to assigning Reader, AppGw for Containers Configuration Manager and Cost Management Reader. The later run removes an assignment that lacks the condition, or has the two-role condition, and creates the assignment again with the condition. Azure keeps the condition of an existing assignment on an update |
 | Role assignment removal | Later | Contributor and User Access Administrator on the subscription. Every role of the deployment identity in the subscription outside the ten roles and the Content Understanding role on a resource in the resource group |
+| Role assignment removal | Later | Every role assignment made on the resource group itself whose identity is gone from Microsoft Entra ID, whatever the role. The migration retires the identities of the previous platform version. Their assignments outlive them. They grant nothing, and the Azure portal shows them as "Identity not found". Azure reports such an identity as Unknown. The migration script then reads the object from Microsoft Entra ID. The assignment is removed only when that read answers that the object is gone. An assignment inherited from the subscription is never read or touched |
 | Tag | First and later | `NeologikOnboardingKit` on the resource group, set to the value of `-KitVersion`, merged with the other tags |
 | Role assignment | Both | Storage Blob Data Contributor on one storage account to the signed-in administrator, only when the storage account refuses the upload of the files of the run |
 

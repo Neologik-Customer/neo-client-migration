@@ -61,6 +61,7 @@ The grants for agents and Apps that work unattended in Microsoft 365 are not par
 | Requirement | Detail |
 |---|---|
 | PowerShell | PowerShell 7.4 or later. Windows PowerShell 5.1 cannot run the migration script |
+| Workstation | A desktop and a browser, for the sign-in |
 | Microsoft Entra role | **Global Administrator** in your tenant |
 | Azure role | **Owner** or **User Access Administrator** on the subscription of the environment. The migration script assigns and, in the later run, removes Azure roles |
 | The command from Neologik | The command names your tenant, your subscription, your resource group, the application registrations of the environment and the version of the onboarding kit that the migration brings your environment to |
@@ -81,7 +82,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 The first command removes the mark that Windows puts on a downloaded file. Without it, PowerShell refuses the script with the words `not digitally signed`. The second command lifts the execution policy for the current PowerShell window only. If PowerShell still refuses a script with the words `not digitally signed`, the execution policy is set by Group Policy, which the command above cannot change. Run `Get-ExecutionPolicy -List`: a value other than `Undefined` on the `MachinePolicy` or `UserPolicy` row confirms it. An administrator of that policy allows `RemoteSigned` for the workstation, or you run the scripts from a workstation without the policy.
 
 4. Paste the command from Neologik and press Enter.
-5. The migration script prints a web address and a code. Open the web address in a browser on any device, enter the code and sign in as a Global Administrator who also holds Owner or User Access Administrator on the subscription. The migration script then signs in to Azure in the same way, with the same account.
+5. The migration script opens the sign-in page in your browser. Sign in as a Global Administrator who also holds Owner or User Access Administrator on the subscription. The migration script then signs in to Azure with the same account. When the browser sign-in does not complete, the migration script prints a web address and a code to enter in a browser on any device.
 6. Read the summary table on screen and the list `FILES TO SEND TO NEOLOGIK` under it. Send the files to Neologik, unless the list says that the run uploaded them.
 
 To see what a run would change, add `-Verify` to the end of the command. The migration script reports each pending change as `WOULD` and writes nothing.
