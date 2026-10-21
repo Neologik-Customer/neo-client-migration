@@ -37,8 +37,8 @@ This document has two readers.
 
 | File | Purpose |
 |---|---|
-| `Migrate-NeologikEnvironment.ps1` | The migration script. A Global Administrator runs the migration script twice: the first run before the migration, the later run after Neologik has proven the environment |
-| `NeologikGuestUsers.txt` | The list of Neologik support accounts. The first run confirms that each account is a guest of your tenant |
+| `Migrate-NeologikEnvironment.ps1` | The migration script. A Global Administrator runs the migration script twice: the pre migration script before the migration, the post migration script after Neologik has proven the environment |
+| `NeologikGuestUsers.txt` | The list of Neologik support accounts. The pre migration script confirms that each account is a guest of your tenant |
 | [README.md](README.md) | This document. The place to start |
 | [docs/MIGRATION-SCRIPT-GUIDE.md](docs/MIGRATION-SCRIPT-GUIDE.md) | What the migration script checks and changes, run by run |
 | [docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md](docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md) | For Approvers. Each sign-in, each permission, each write and each file |
@@ -49,10 +49,10 @@ This document has two readers.
 
 | Run | When Neologik asks for the run | What the migration script does |
 |---|---|---|
-| The first run | Before the environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Removes nothing |
-| The later run | After Neologik has deployed and proven the environment | Reduces the access of the deployment identity to the roles that the deployment identity needs |
+| The pre migration script | Before the environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Removes nothing |
+| The post migration script | After Neologik has deployed and proven the environment | Reduces the access of the deployment identity to the roles that the deployment identity needs |
 
-The first run removes nothing. The deployment identity keeps the access it holds today until the later run. Between the two runs, Neologik can put right a failed first run or a failed deployment with that access.
+The pre migration script removes nothing. The deployment identity keeps the access it holds today until the post migration script. Between the two runs, Neologik can put right a failed pre migration script or a failed deployment with that access.
 
 The grants for agents and Apps that work unattended in Microsoft 365 are not part of the migration script. When an agent or an App of the migrated environment is to work unattended, a Global Administrator runs the grants script of the onboarding kit, `Grant-NeologikAgentAccess.ps1`, with the files that the Neologik Context Engine exports.
 
@@ -63,14 +63,14 @@ The grants for agents and Apps that work unattended in Microsoft 365 are not par
 | PowerShell | PowerShell 7.4 or later. Windows PowerShell 5.1 cannot run the migration script |
 | Workstation | A desktop and a browser, for the sign-in |
 | Microsoft Entra role | **Global Administrator** in your tenant |
-| Azure role | **Owner** or **User Access Administrator** on the subscription of the environment. The migration script assigns and, in the later run, removes Azure roles |
+| Azure role | **Owner** or **User Access Administrator** on the subscription of the environment. The migration script assigns and, in the post migration script, removes Azure roles |
 | The command from Neologik | The command names your tenant, your subscription, your resource group, the application registrations of the environment and the version of the onboarding kit that the migration brings your environment to |
 
 The migration script installs the PowerShell modules that the run needs, for your user account, when the modules are missing.
 
 ## Run the migration script
 
-1. Extract the migration package to a folder, for example `C:\Neologik`. A zip downloaded from GitHub extracts to a folder inside the folder you choose, named `neo-client-migration-main`. The script is in that inner folder. Keep the files together: the first run reads `NeologikGuestUsers.txt` from the folder of the migration script.
+1. Extract the migration package to a folder, for example `C:\Neologik`. A zip downloaded from GitHub extracts to a folder inside the folder you choose, named `neo-client-migration-main`. The script is in that inner folder. Keep the files together: the pre migration script reads `NeologikGuestUsers.txt` from the folder of the migration script.
 2. Open PowerShell 7 and go to the folder that holds the script, for example `cd C:\Neologik\neo-client-migration-main`.
 3. Allow the script to run in this session:
 
@@ -91,9 +91,9 @@ To see what a run would change, add `-Verify` to the end of the command. The mig
 
 ## After the migration
 
-Neologik tells you when the environment is proven. Neologik then sends the command of the later run. After the later run, the deployment identity holds the access that [MIGRATION-SCRIPT-GUIDE.md](docs/MIGRATION-SCRIPT-GUIDE.md) lists and nothing else.
+Neologik tells you when the environment is proven. Neologik then sends the command of the post migration script. After the post migration script, the deployment identity holds the access that [MIGRATION-SCRIPT-GUIDE.md](docs/MIGRATION-SCRIPT-GUIDE.md) lists and nothing else.
 
-The migration package has no further use after the later run. The onboarding kit holds every script that a migrated environment needs later.
+The migration package has no further use after the post migration script. The onboarding kit holds every script that a migrated environment needs later.
 
 ## Help
 
