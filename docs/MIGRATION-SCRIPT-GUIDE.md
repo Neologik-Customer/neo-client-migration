@@ -6,10 +6,10 @@
 
 | Run | When Neologik asks for the run | What the migration script does |
 |---|---|---|
-| The first run | Before an existing environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Removes nothing |
-| The later run | After Neologik has deployed and proven the environment | Reduces the access of the deployment identity to the roles that the deployment identity needs |
+| The pre migration script | Before an existing environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Removes nothing |
+| The post migration script | After Neologik has deployed and proven the environment | Reduces the access of the deployment identity to the roles that the deployment identity needs |
 
-The first run removes nothing. The deployment identity keeps the access it holds today until the later run. Between the two runs, Neologik can put right a failed first run or a failed deployment with that access. Neologik then needs no further request to you.
+The pre migration script removes nothing. The deployment identity keeps the access it holds today until the post migration script. Between the two runs, Neologik can put right a failed pre migration script or a failed deployment with that access. Neologik then needs no further request to you.
 
 Neologik sends the complete command, with every value filled in. You supply the sign-in.
 
@@ -21,8 +21,8 @@ The grants for agents and Apps that work unattended in Microsoft 365 are not par
 
 1. [What you need](#what-you-need)
 2. [How to run the migration script](#how-to-run-the-migration-script)
-3. [The first run](#the-first-run)
-4. [The later run](#the-later-run)
+3. [The pre migration script](#the-pre-migration-script)
+4. [The post migration script](#the-post-migration-script)
 5. [What the migration script never does](#what-the-migration-script-never-does)
 6. [What the sign-in asks you to approve](#what-the-sign-in-asks-you-to-approve)
 7. [What you receive](#what-you-receive)
@@ -51,7 +51,7 @@ Each run makes one more check before the run changes an Azure role. The signed-i
 
 ## How to run the migration script
 
-1. Place the migration package in a folder on your workstation. The first run reads `NeologikGuestUsers.txt` from the folder of `Migrate-NeologikEnvironment.ps1`.
+1. Place the migration package in a folder on your workstation. The pre migration script reads `NeologikGuestUsers.txt` from the folder of `Migrate-NeologikEnvironment.ps1`.
 2. Open PowerShell 7 in that folder.
 3. Paste the command from Neologik and press Enter.
 4. The migration script opens the sign-in page in your browser. Sign in as a Global Administrator who also holds Owner or User Access Administrator on the subscription. The account picker may offer another account that is a Global Administrator but holds no role on the subscription, such as a guest account; the Azure steps are skipped for that account and the run must be repeated. The migration script waits for up to 5 minutes.
@@ -64,9 +64,9 @@ The command names the version of the onboarding kit that the migration brings yo
 
 To see what a run would change, add `-Verify` to the end of the command. The sign-ins are the same. The migration script reports each pending change as `WOULD` and writes nothing.
 
-## The first run
+## The pre migration script
 
-The command selects the first run when the command does not name `-LaterRun`. The first run has five steps. The migration script checks each item of a step separately. When an item fails, the migration script records the item and the reason in the summary and continues. The first run removes nothing.
+The command selects the pre migration script when the command does not name `-LaterRun`. The pre migration script has five steps. The migration script checks each item of a step separately. When an item fails, the migration script records the item and the reason in the summary and continues. The pre migration script removes nothing.
 
 ### Step 1: The agent identity blueprint and the permissions of the deployment identity
 
@@ -78,7 +78,7 @@ The command selects the first run when the command does not name `-LaterRun`. Th
 | Sponsor | The agent identity blueprint has a sponsor. The sponsor is the person who is accountable for the agents of the environment. The summary names the sponsor | The migration script adds the signed-in Global Administrator as the sponsor when the agent identity blueprint has no sponsor |
 | The permission of the service principal | The service principal holds `AgentIdUser.ReadWrite.IdentityParentedBy`. The permission covers only the agent users of this agent identity blueprint | The migration script grants the permission when the permission is absent |
 | The federated credentials | The agent identity blueprint holds the three federated credentials through which the Neologik deployment signs in as the agent identity blueprint | The migration script adds a federated credential when the federated credential is absent |
-| The permissions that the deployment identity keeps | The deployment identity holds `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` | The migration script grants a permission when the permission is absent. The first run removes no permission. The later run removes the seven permissions listed under step 6 |
+| The permissions that the deployment identity keeps | The deployment identity holds `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` | The migration script grants a permission when the permission is absent. The pre migration script removes no permission. The post migration script removes the seven permissions listed under step 6 |
 
 The deployment identity can already own one agent identity blueprint with another short name. The migration script then uses that agent identity blueprint and creates no second one. The summary then names the agent identity blueprint that the migration script used.
 
@@ -129,11 +129,11 @@ The migration script confirms that the deployment identity holds ten Azure roles
 | Resource group | Contributor<br>Key Vault Certificates Officer<br>Key Vault Secrets Officer<br>Storage Blob Data Contributor<br>Azure Kubernetes Service RBAC Cluster Admin<br>Monitoring Contributor<br>Role Based Access Control Administrator |
 | Subscription | Reader<br>Cost Management Contributor<br>Role Based Access Control Administrator, limited to assigning three roles: Reader, AppGw for Containers Configuration Manager and Cost Management Reader |
 
-The deployment runs the ingress controller of a secure environment with Application Gateway for Containers. Microsoft requires the identity of that controller to hold two roles. The first is Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The second is AppGw for Containers Configuration Manager on the resource group of the environment. The third role is Cost Management Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster: the identity of the configuration API of the Neologik Platform holds it and reads the daily cost of the nodes for the return on investment report. The condition on the role lets the deployment identity assign those three roles and no other role. The deployment identity may already hold Role Based Access Control Administrator on the subscription without the condition. The first run then reports `Already assigned without the limit` and keeps the role, because the first run removes nothing. The later run writes the condition onto that assignment and reports `Limit applied`.
+The deployment runs the ingress controller of a secure environment with Application Gateway for Containers. Microsoft requires the identity of that controller to hold two roles. The first is Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The second is AppGw for Containers Configuration Manager on the resource group of the environment. The third role is Cost Management Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster: the identity of the configuration API of the Neologik Platform holds it and reads the daily cost of the nodes for the return on investment report. The condition on the role lets the deployment identity assign those three roles and no other role. The deployment identity may already hold Role Based Access Control Administrator on the subscription without the condition. The pre migration script then reports `Already assigned without the limit` and keeps the role, because the pre migration script removes nothing. The post migration script writes the condition onto that assignment and reports `Limit applied`.
 
 When the deployment identity holds all ten roles, the migration script records the version of the onboarding kit that the command names on the resource group. The record is the tag `NeologikOnboardingKit`. The migration script keeps your other tags and writes the tag only when the value differs. The Neologik Platform reads the tag before an upgrade.
 
-The first run changes nothing on a managed identity, on a security group or on a user. The first run removes no role, no permission and no membership.
+The pre migration script changes nothing on a managed identity, on a security group or on a user. The pre migration script removes no role, no permission and no membership.
 
 ### Step 5a: The Azure quotas that the migration needs
 
@@ -147,9 +147,9 @@ The migration script reads three quotas of your subscription, in the region of t
 
 A read that Azure refuses reports `Review` with the reason, and the run continues.
 
-## The later run
+## The post migration script
 
-The command selects the later run with `-LaterRun`. Neologik asks for the later run once Neologik has deployed and proven the environment. The later run makes none of the checks of the first run.
+The command selects the post migration script with `-LaterRun`. Neologik asks for the post migration script once Neologik has deployed and proven the environment. The post migration script makes none of the checks of the pre migration script.
 
 ### Step 6: Permission reduction
 
@@ -192,12 +192,12 @@ The migration script signs in to Microsoft Graph with your account. At the first
 | `User.Read` | Every run | To identify your account |
 | `DelegatedPermissionGrant.Read.All` | Every run | To read the consent of the Platform Sign-in application |
 | `AgentIdentityBlueprint.Create`<br>`AgentIdentityBlueprint.AddRemoveCreds.All`<br>`AgentIdentityBlueprintPrincipal.Create` | Every run | To create the agent identity blueprint, the service principal and the federated credentials when each is absent |
-| `GroupMember.ReadWrite.All` | The first run | To add the Neologik guest users and the signed-in administrator to the security groups |
-| `Group.ReadWrite.All` | The first run | To create a security group of version 5 that is absent, and to rename the user group of the Neologik Context Engine |
-| `User.Invite.All` | The first run | To invite a Neologik support account that is not yet a guest of your tenant |
-| `AgentIdentityBlueprintPrincipal.ReadWrite.All` | The first run | To add the deployment identity as an owner of the service principal of the agent identity blueprint. The migration script adds the owner when that service principal has none |
-| `RoleManagement.ReadWrite.Directory` | The later run | To remove directory roles from the deployment identity |
-| `GroupMember.ReadWrite.All` | The later run | To remove the deployment identity from groups |
+| `GroupMember.ReadWrite.All` | The pre migration script | To add the Neologik guest users and the signed-in administrator to the security groups |
+| `Group.ReadWrite.All` | The pre migration script | To create a security group of version 5 that is absent, and to rename the user group of the Neologik Context Engine |
+| `User.Invite.All` | The pre migration script | To invite a Neologik support account that is not yet a guest of your tenant |
+| `AgentIdentityBlueprintPrincipal.ReadWrite.All` | The pre migration script | To add the deployment identity as an owner of the service principal of the agent identity blueprint. The migration script adds the owner when that service principal has none |
+| `RoleManagement.ReadWrite.Directory` | The post migration script | To remove directory roles from the deployment identity |
+| `GroupMember.ReadWrite.All` | The post migration script | To remove the deployment identity from groups |
 
 The sign-in to Azure uses the same account and shows no list of permissions.
 
@@ -208,9 +208,9 @@ The migration script prints a summary table. The migration script writes three f
 | File | Name | Content |
 |---|---|---|
 | The log file | `NeologikEnvironmentMigration_<date and time>.log` | Every message of the run, from the first line. Each failed request to Microsoft Graph, with its status and the request id by which Microsoft can find the request. The summary table |
-| The summary file of the first run | `Neologik_EnvironmentMigration_PreWindow_<date and time>.json` | The summary of the run, see below |
-| The summary file of the later run | `Neologik_EnvironmentMigration_PostWindow_<date and time>.json` | The summary of the run, see below |
-| The snapshot file | `Neologik_EnvironmentMigration_Snapshot_Pre_<date and time>.json` after the first run, `..._Post_...` after the later run | The state that the run leaves. For each application registration: the owners, the unique name, the kinds and expiry dates of credentials, the permissions and the consents. For the deployment identity: the Azure roles and the group memberships. For each security group: the member count. Every item of the summary. No secret value. Neologik compares the Pre and the Post snapshot to confirm that the upgrade changed what the upgrade was meant to change, and nothing else |
+| The summary file of the pre migration script | `Neologik_EnvironmentMigration_PreWindow_<date and time>.json` | The summary of the run, see below |
+| The summary file of the post migration script | `Neologik_EnvironmentMigration_PostWindow_<date and time>.json` | The summary of the run, see below |
+| The snapshot file | `Neologik_EnvironmentMigration_Snapshot_Pre_<date and time>.json` after the pre migration script, `..._Post_...` after the post migration script | The state that the run leaves. For each application registration: the owners, the unique name, the kinds and expiry dates of credentials, the permissions and the consents. For the deployment identity: the Azure roles and the group memberships. For each security group: the member count. Every item of the summary. No secret value. Neologik compares the Pre and the Post snapshot to confirm that the upgrade changed what the upgrade was meant to change, and nothing else |
 
 The migration script writes the summary file on every exit, a run that stopped before its steps included. The migration script writes to the current folder when the folder of the migration script is not writable. The migration script writes to the temporary folder when the current folder is not writable.
 
@@ -226,7 +226,7 @@ The summary file holds these things:
 - the signed-in account
 - the time of the run
 - the Microsoft Graph application permissions that the deployment identity holds
-- the ids of the two role groups of the Neologik Context Engine, after the first run
+- the ids of the two role groups of the Neologik Context Engine, after the pre migration script
 - every item of the summary
 - the path of the log file, and the reason when the run stopped before its steps
 
@@ -248,13 +248,13 @@ No file holds a secret.
 
 ## Questions
 
-**Does the first run give Neologik more access?**
+**Does the pre migration script give Neologik more access?**
 
-The first run adds only a role or a permission that is absent from the set listed in this document, and removes nothing. The deployment identity keeps the wider access it held before the run until the later run. The later run removes that wider access, so that the deployment identity ends with the access listed in this document and nothing else.
+The pre migration script adds only a role or a permission that is absent from the set listed in this document, and removes nothing. The deployment identity keeps the wider access it held before the run until the post migration script. The post migration script removes that wider access, so that the deployment identity ends with the access listed in this document and nothing else.
 
-**Why does the first run keep the wider access until the later run?**
+**Why does the pre migration script keep the wider access until the post migration script?**
 
-Neologik deploys the new version of the environment between the two runs. When a step of the first run or of the deployment fails, Neologik puts the step right. The deployment identity still holds the access for that, so Neologik needs no further request to you. Once the environment is proven, the later run removes the wider access.
+Neologik deploys the new version of the environment between the two runs. When a step of the pre migration script or of the deployment fails, Neologik puts the step right. The deployment identity still holds the access for that, so Neologik needs no further request to you. Once the environment is proven, the post migration script removes the wider access.
 
 **Why does my account need such wide permissions?**
 

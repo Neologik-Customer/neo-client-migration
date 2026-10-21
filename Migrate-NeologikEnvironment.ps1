@@ -3,8 +3,8 @@
 <#
 .SYNOPSIS
     Moves an existing Neologik Platform environment to version 5: confirms the
-    access that the Neologik deployment identity needs in the first run, and
-    reduces the access in the later run. A Global Administrator runs the script.
+    access that the Neologik deployment identity needs in the pre migration script, and
+    reduces the access in the post migration script. A Global Administrator runs the script.
 
 .DESCRIPTION
     docs\MIGRATION-SCRIPT-GUIDE.md describes the script in full.
@@ -31,18 +31,18 @@
     The command selects the run.
 
       Command            Run
-      Without -LaterRun  The first run
-      -LaterRun          The later run, with the permission reduction
+      Without -LaterRun  The pre migration script
+      -LaterRun          The post migration script, with the permission reduction
 
-    The first run removes nothing. The deployment identity keeps its wider access
-    until the later run, so that Neologik can repair a failed first run or a failed
+    The pre migration script removes nothing. The deployment identity keeps its wider access
+    until the post migration script, so that Neologik can repair a failed pre migration script or a failed
     deployment with that access.
 
     The grants for agents and Apps that work unattended in Microsoft 365 are not
     part of this script. The onboarding kit script Grant-NeologikAgentAccess.ps1
     applies them, with the two files that the Neologik Context Engine exports.
 
-    THE FIRST RUN
+    THE PRE MIGRATION SCRIPT
 
     Step 1. The agent identity blueprint and the permissions of the deployment
     identity.
@@ -136,16 +136,16 @@
       to the identity of the ingress controller of a secure environment, and Cost
       Management Reader to the identity of the configuration API of the platform,
       and no other role. The script assigns a role that is absent and removes nothing.
-      When the limited role is already held without the limit, the first run
-      reports it and the later run applies the limit.
+      When the limited role is already held without the limit, the pre migration script
+      reports it and the post migration script applies the limit.
 
       When the deployment identity holds all ten roles, the script records the
       version of the onboarding kit that -KitVersion names on the resource group,
       in the tag NeologikOnboardingKit.
 
-    THE LATER RUN
+    THE POST MIGRATION SCRIPT
 
-    The later run comes after the deployment by Neologik is proven. The later run
+    The post migration script comes after the deployment by Neologik is proven. The post migration script
     reduces the access of the deployment identity.
 
     Step 6. Permission reduction, with -LaterRun.
@@ -192,10 +192,10 @@
       Every run             AgentIdentityBlueprint.Create
       Every run             AgentIdentityBlueprint.AddRemoveCreds.All
       Every run             AgentIdentityBlueprintPrincipal.Create
-      The first run         GroupMember.ReadWrite.All
-      The first run         Group.ReadWrite.All
-      The first run         User.Invite.All
-      The first run         AgentIdentityBlueprintPrincipal.ReadWrite.All
+      The pre migration script         GroupMember.ReadWrite.All
+      The pre migration script         Group.ReadWrite.All
+      The pre migration script         User.Invite.All
+      The pre migration script         AgentIdentityBlueprintPrincipal.ReadWrite.All
       A run with -LaterRun  RoleManagement.ReadWrite.Directory
       A run with -LaterRun  GroupMember.ReadWrite.All
 
@@ -206,13 +206,13 @@
         first line of the run: every message, each failed request to Microsoft
         Graph with its status and request id, and the summary table.
       - The summary file Neologik_EnvironmentMigration_<PreWindow|PostWindow>_<time
-        stamp>.json. The name holds PreWindow for the first run and PostWindow
-        for the later run. The script writes the summary file on every exit, a
+        stamp>.json. The name holds PreWindow for the pre migration script and PostWindow
+        for the post migration script. The script writes the summary file on every exit, a
         run that stopped before its steps included.
       - The snapshot file Neologik_EnvironmentMigration_Snapshot_<Pre|Post>_<time
         stamp>.json: the state of the application registrations, the security
         groups and the deployment identity as the run leaves them, with every
-        item of the summary. The first run writes the Pre snapshot and the later
+        item of the summary. The pre migration script writes the Pre snapshot and the later
         run the Post snapshot. Neologik compares the two to validate the
         migration.
 
@@ -256,15 +256,15 @@
 
 .PARAMETER SolutionName
     The solution name of the environment, for example neo-abcprd-uks-01. Required
-    for the first run.
+    for the pre migration script.
 
 .PARAMETER SolutionShortName
     The short name of the environment, for example abcprd01. The name of the agent
-    identity blueprint holds the short name. Required for the first run.
+    identity blueprint holds the short name. Required for the pre migration script.
 
 .PARAMETER SignInAppClientId
     The client id of the application 'Neologik Platform Sign-in'. Required for the
-    first run.
+    pre migration script.
 
 .PARAMETER SharePointAppClientId
     The client id of the application 'Neologik SharePoint Access - <short name>'.
@@ -288,21 +288,21 @@
 
 .PARAMETER AdminGroupId
     The object id of the Neologik Admin User Group. Without the parameter, and
-    without a configuration file that names the group, the first run does not check
+    without a configuration file that names the group, the pre migration script does not check
     the membership of the Admin User Group. The summary then reads 'Not checked'.
 
 .PARAMETER LaterRun
-    Selects the later run. The later run reduces the access of the deployment
-    identity. Neologik asks for the later run once the deployment is proven. The
-    later run needs SubscriptionId and ResourceGroupName.
+    Selects the post migration script. The post migration script reduces the access of the deployment
+    identity. Neologik asks for the post migration script once the deployment is proven. The
+    post migration script needs SubscriptionId and ResourceGroupName.
 
 .PARAMETER ScriptRunnerObjectId
     The object id of the script runner identity, the managed identity named
     'neologik-script-runner-service-connection-<short name>', which the
-    deployment runs its scripts with. The later run gives that identity Reader
+    deployment runs its scripts with. The post migration script gives that identity Reader
     on the resource group, then removes Contributor on the subscription and on
     the resource group from that identity. The command from Neologik gives the
-    value. Without the parameter the later run leaves the roles of that identity.
+    value. Without the parameter the post migration script leaves the roles of that identity.
 
 .PARAMETER UploadStorageAccountName
     A storage account of the environment to which the script uploads the files of
@@ -325,11 +325,11 @@
     parameter. Leave the parameter out of the command.
 
 .PARAMETER SubscriptionId
-    The id of the Azure subscription. Required for the first run when the command
+    The id of the Azure subscription. Required for the pre migration script when the command
     names no configuration file.
 
 .PARAMETER ResourceGroupName
-    The name of the Neologik resource group. Required for the first run when the
+    The name of the Neologik resource group. Required for the pre migration script when the
     command names no configuration file.
 
 .PARAMETER BlueprintKey
@@ -339,17 +339,17 @@
 .EXAMPLE
     ./Migrate-NeologikEnvironment.ps1 -KitVersion v5.0.15 -TenantId <tenant id> -DeploySpClientId <deployment identity client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <sign-in application client id> -SharePointAppClientId <SharePoint application client id> -BotAppClientIds <client id>,<client id> -NceUserGroupId <group object id> -AdminGroupId <group object id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01
 
-    The first run, with the command that Neologik sends.
+    The pre migration script, with the command that Neologik sends.
 
 .EXAMPLE
     ./Migrate-NeologikEnvironment.ps1 -KitVersion v5.0.15 -TenantId <tenant id> -DeploySpClientId <client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <client id> -BotAppClientIds <client id> -NceUserGroupId <group id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01 -Verify
 
-    The first run with -Verify. The script reports each pending change and writes nothing.
+    The pre migration script with -Verify. The script reports each pending change and writes nothing.
 
 .EXAMPLE
     ./Migrate-NeologikEnvironment.ps1 -KitVersion v5.0.15 -TenantId <tenant id> -DeploySpClientId <client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <client id> -NceUserGroupId <group id> -AdminGroupId <group id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01 -LaterRun -ScriptRunnerObjectId <script runner identity object id>
 
-    The later run. The script reduces the access of the deployment identity and of the script runner identity.
+    The post migration script. The script reduces the access of the deployment identity and of the script runner identity.
 
 .NOTES
     Requires PowerShell 7.4 or later.
@@ -390,7 +390,7 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '', Justification = 'Connect-MgGraph requires a secure string. The script takes the token from the Azure CLI session and writes the token nowhere.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidOverwritingBuiltInCmdlets', '', Justification = 'The onboarding script uses the same function name. PowerShell 7 has no built-in command named Write-Log.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPositionalParameters', 'Get-NeologikProperty', Justification = 'Get-NeologikProperty takes the object, the name and the default value in that order. Named parameters would make each of the 60 calls three times as long.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'The script reads the current state before each write. A second run changes nothing that the first run completed.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'The script reads the current state before each write. A second run changes nothing that the pre migration script completed.')]
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $false)]
@@ -548,7 +548,7 @@ $script:ScriptRunnerLegacyRole = 'Contributor'
 
 # The deployment identity is not a member of the Admin User Group. The deployment
 # identity reaches SQL as the Microsoft Entra administrator of the SQL server. The
-# deployment by Neologik sets that administrator. The first run removes an existing
+# deployment by Neologik sets that administrator. The pre migration script removes an existing
 # membership only when each SQL server in the resource group names the deployment
 # identity as the administrator.
 # Before that, the membership is the only access of the deployment identity to SQL.
@@ -557,9 +557,9 @@ $script:AdminGroupNamePattern = 'Neologik Admin User Group*'
 
 # The declared set. The deployment identity holds the roles above and one further
 # role. The deployment by Neologik grants the further role on the Content
-# Understanding account, at a scope below the resource group. The later run removes
+# Understanding account, at a scope below the resource group. The post migration script removes
 # every other Azure role that the deployment identity holds in the subscription. The
-# later run also removes every directory role and every group membership.
+# post migration script also removes every directory role and every group membership.
 $script:DeclaredResourceRoles = @('Cognitive Services Content Understanding Contributor')
 
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
@@ -623,7 +623,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.1'
+$script:ScriptVersion = '1.1.2'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -1533,8 +1533,8 @@ function Resolve-NeologikInput {
         throw [System.ArgumentException]::new("KitVersion must be a version in the form vX.Y.P, for example v5.0.15. The value is '$($state.KitVersion)'.")
     }
     $script:KitVersion = $state.KitVersion
-    # The command selects the run. -LaterRun selects the later run, which reduces the
-    # access of the deployment identity. A command without -LaterRun selects the first run.
+    # The command selects the run. -LaterRun selects the post migration script, which reduces the
+    # access of the deployment identity. A command without -LaterRun selects the pre migration script.
     $state.Run = if ($state.LaterRun) { 'PostWindow' } else { 'PreWindow' }
     $state.Config = $null
     $state.OnboardingStorageAccountName = ''
@@ -1544,7 +1544,7 @@ function Resolve-NeologikInput {
     $state.ShortName = $state.SolutionShortName.Trim()
     $state.ShortNameSource = if ($state.ShortName) { '-SolutionShortName' } else { '' }
     # The Neologik support accounts: the file that the command names, else the file
-    # beside the script. The first run reads the file. A file that the command names
+    # beside the script. The pre migration script reads the file. A file that the command names
     # must exist.
     $state.GuestUserEmails = @()
     $state.NceContributorsGroupId = ''
@@ -1623,21 +1623,21 @@ function Resolve-NeologikInput {
         }
     }
     if (($state.Run -eq 'PreWindow' -or $state.LaterRun) -and (-not $state.SubscriptionId -or -not $state.ResourceGroupName)) {
-        $which = if ($state.Run -eq 'PreWindow') { 'The first run needs SubscriptionId and ResourceGroupName for the Azure roles of the deployment identity' } else { 'The later run with -LaterRun needs SubscriptionId and ResourceGroupName for the permission reduction' }
+        $which = if ($state.Run -eq 'PreWindow') { 'The pre migration script needs SubscriptionId and ResourceGroupName for the Azure roles of the deployment identity' } else { 'The post migration script with -LaterRun needs SubscriptionId and ResourceGroupName for the permission reduction' }
         throw [System.ArgumentException]::new("$which. Add -SubscriptionId and -ResourceGroupName to the command, or add -ConfigurationFile.")
     }
     if ($state.Run -eq 'PreWindow' -and -not $state.ShortName) {
         # The name of the agent identity blueprint holds the short name. The script never
         # reads the short name from a display name.
-        throw [System.ArgumentException]::new("The first run needs SolutionShortName. SolutionShortName is the short name of the environment, for example abcprd01. The name of the agent identity blueprint holds the short name. Add -SolutionShortName to the command, or add -ConfigurationFile.")
+        throw [System.ArgumentException]::new("The pre migration script needs SolutionShortName. SolutionShortName is the short name of the environment, for example abcprd01. The name of the agent identity blueprint holds the short name. Add -SolutionShortName to the command, or add -ConfigurationFile.")
     }
     if ($state.Run -eq 'PreWindow' -and -not $state.SignInAppClientId) {
         # The client id names the Platform Sign-in application. The script never finds the
         # Platform Sign-in application by display name.
-        throw [System.ArgumentException]::new("The first run needs SignInAppClientId. SignInAppClientId is the client id of the application registration 'Neologik Platform Sign-in'. Add -SignInAppClientId to the command, or add -ConfigurationFile.")
+        throw [System.ArgumentException]::new("The pre migration script needs SignInAppClientId. SignInAppClientId is the client id of the application registration 'Neologik Platform Sign-in'. Add -SignInAppClientId to the command, or add -ConfigurationFile.")
     }
     if ($state.Run -eq 'PreWindow' -and -not $state.SolutionName) {
-        throw [System.ArgumentException]::new("The first run needs SolutionName. SolutionName is the solution name of the environment, for example neo-abcprd-uks-01. The unique name of the Platform Sign-in application is sp-admin-<solution name>. Add -SolutionName to the command, or add -ConfigurationFile.")
+        throw [System.ArgumentException]::new("The pre migration script needs SolutionName. SolutionName is the solution name of the environment, for example neo-abcprd-uks-01. The unique name of the Platform Sign-in application is sp-admin-<solution name>. Add -SolutionName to the command, or add -ConfigurationFile.")
     }
 }
 
@@ -1652,17 +1652,17 @@ function Test-NeologikPowerShellVersion {
 
 function Write-NeologikHeader {
     $state = $script:State
-    $runTitle = if ($state.Run -eq 'PostWindow') { 'later run' } else { 'first run' }
+    $runTitle = if ($state.Run -eq 'PostWindow') { 'post migration script' } else { 'pre migration script' }
     if ($state.Verify) { $runTitle = "$runTitle with -Verify" }
     # The header goes to the console and to the log file.
     $lines = @('', '=============================================================', " Neologik environment migration: $runTitle",
         '=============================================================', "  Migration script:                           $($script:ScriptVersion)",
         "  Onboarding kit:                             $($script:KitVersion)")
     if ($state.Run -eq 'PostWindow') {
-        $lines += '  The later run reduces the access of the deployment identity.'
+        $lines += '  The post migration script reduces the access of the deployment identity.'
     }
     else {
-        $lines += '  The first run confirms the directory objects and the roles that the deployment needs. The first run removes nothing.'
+        $lines += '  The pre migration script confirms the directory objects and the roles that the deployment needs. The pre migration script removes nothing.'
     }
     if ($state.Verify) { $lines += '  -Verify: the script reports each change as WOULD and writes nothing.' }
     $lines += "  Tenant:                                     $($state.TenantId)"
@@ -1744,7 +1744,7 @@ function Get-NeologikGraphScope {
         'DelegatedPermissionGrant.Read.All', 'AgentIdentityBlueprint.Create', 'AgentIdentityBlueprint.AddRemoveCreds.All',
         'AgentIdentityBlueprintPrincipal.Create')
     if ($state.Run -eq 'PreWindow') {
-        # The first run adds the Neologik guest users and the signed-in administrator to
+        # The pre migration script adds the Neologik guest users and the signed-in administrator to
         # the security groups.
         $scopes += 'GroupMember.ReadWrite.All'
         # The security groups of version 5, created when absent, and the Neologik
@@ -1999,7 +1999,7 @@ function Grant-NeologikGraphAppRole {
     return $outcome
 }
 
-# ----- The steps: 1 to 5 in the first run, 6 in the later run ---------------------
+# ----- The steps: 1 to 5 in the pre migration script, 6 in the post migration script ---------------------
 
 function Set-NeologikAgentBlueprint {
     <#
@@ -2320,7 +2320,7 @@ function Set-NeologikAgentBlueprint {
 
 function Set-NeologikDeploymentGraphRole {
     <#
-    Step 1d of the first run, and the start of step 6 of the later run: the two
+    Step 1d of the pre migration script, and the start of step 6 of the post migration script: the two
     Microsoft Graph application permissions that the deployment identity keeps. The
     function grants a permission that is absent and removes nothing. The function
     records in the state whether the deployment identity holds both.
@@ -2336,7 +2336,7 @@ function Set-NeologikDeploymentGraphRole {
 
 function Remove-NeologikRetiredGraphRole {
     <#
-    Step 6a of the later run: the Microsoft Graph application permissions that the
+    Step 6a of the post migration script: the Microsoft Graph application permissions that the
     deployment identity no longer needs. The function first confirms the two
     permissions that the deployment identity keeps, and removes the other permissions
     only when the deployment identity holds both.
@@ -2441,7 +2441,7 @@ function Find-NeologikUserByEmail {
 
 function Set-NeologikSecurityGroup {
     <#
-    Step 2 of the first run. The security groups of version 5 of the Neologik
+    Step 2 of the pre migration script. The security groups of version 5 of the Neologik
     Platform exist in this tenant, the Neologik support accounts are guests of the
     tenant, each guest and the signed-in administrator are members of every group,
     and the two role groups of the Neologik Context Engine are known for step 3.
@@ -2969,7 +2969,7 @@ function Test-NeologikSharePointConsent {
 
 function Test-NeologikPreWindowSharePointConsent {
     <#
-    Step 4a of the first run. The configuration file can record whether the
+    Step 4a of the pre migration script. The configuration file can record whether the
     solution uses SharePoint ingestion, in the field "SharePointIngestion". When
     the configuration file does not hold the field, the script reads the SharePoint
     permissions in the directory. An earlier SharePoint application of Neologik
@@ -2995,7 +2995,7 @@ function Test-NeologikPreWindowSharePointConsent {
 
 function Set-NeologikPlatformAppOwnership {
     <#
-    Step 4b of the first run. The deployment identity must own each application
+    Step 4b of the pre migration script. The deployment identity must own each application
     registration that the Neologik Platform manages in this tenant, and the service
     principal of each. Each application registration must hold the unique name by
     which the deployment finds the application registration. The function changes
@@ -3171,7 +3171,7 @@ function Set-NeologikDirectoryObjectOwner {
     }
 }
 
-# ----- The later run, step 6: permission reduction --------------------------------
+# ----- The post migration script, step 6: permission reduction --------------------------------
 
 function Get-NeologikTokenAccountId {
     # Returns the account that an access token names. The function reads the claim upn,
@@ -3509,8 +3509,8 @@ function Set-NeologikLimitedAzureRoleAssignment {
     on the subscription, with the condition that limits the roles the deployment
     identity may assign. An assignment that carries the condition is reported, not
     recreated. An assignment without the condition, or with an earlier condition, is
-    wider than the deployment needs: the first run reports it and keeps it, because the
-    first run removes nothing; the later run, with -ApplyLimit, removes the assignment
+    wider than the deployment needs: the pre migration script reports it and keeps it, because the
+    pre migration script removes nothing; the post migration script, with -ApplyLimit, removes the assignment
     and creates it again with the condition, because Azure keeps the condition of an
     existing assignment on an update. Returns $true when the deployment identity holds
     the role.
@@ -3531,8 +3531,8 @@ function Set-NeologikLimitedAzureRoleAssignment {
         }
         if ($assignments.Count -gt 0) {
             if (-not $ApplyLimit) {
-                Write-Log "  $item role '$roleName': assigned without the limit. The later run applies the limit" -Level Warning
-                Add-Summary $item 'Already assigned without the limit. The later run applies the limit'
+                Write-Log "  $item role '$roleName': assigned without the limit. The post migration script applies the limit" -Level Warning
+                Add-Summary $item 'Already assigned without the limit. The post migration script applies the limit'
                 return $true
             }
             if (Test-NeologikVerifyOnly) {
@@ -3720,7 +3720,7 @@ function Remove-NeologikAdminGroupMembership {
     $deploySp = $state.DeploySp
     $label = 'Admin User Group membership'
     if (-not $state.AdminGroupId -and $state.ShortName) {
-        # The later run makes none of the group checks of the first run, so the function
+        # The post migration script makes none of the group checks of the pre migration script, so the function
         # finds the Admin User Group by its version 5 name when the command gives no id.
         try {
             $adminGroup = Get-NeologikGroupByName -DisplayName "Neologik Admin User Group - $($state.ShortName)"
@@ -3978,7 +3978,7 @@ function Remove-NeologikUndeclaredGroupMembership {
 }
 
 function Set-NeologikKitVersionTag {
-    # Step 5 of the first run and step 6j of the later run: the version of the onboarding
+    # Step 5 of the pre migration script and step 6j of the post migration script: the version of the onboarding
     # kit that -KitVersion names, in the tag NeologikOnboardingKit on the
     # resource group. The Neologik Platform reads the tag before an upgrade. The function
     # writes the tag last, merges the tag with the existing tags, and writes only a
@@ -4022,7 +4022,7 @@ function Get-NeologikScriptRunnerItem {
 
 function Remove-NeologikScriptRunnerWideRole {
     <#
-    Step 6i of the later run: the script runner identity, the managed identity that the
+    Step 6i of the post migration script: the script runner identity, the managed identity that the
     deployment runs its scripts with. The function gives the identity Reader on the
     resource group, then removes Contributor on the subscription and on the resource
     group. The function removes nothing unless the identity holds Reader. The function
@@ -4052,10 +4052,10 @@ function Remove-NeologikScriptRunnerWideRole {
 
 function Set-NeologikDeploymentAzureRole {
     <#
-    Step 5 of the first run, and the first part of the permission reduction of the
-    later run: the ten Azure roles of the deployment identity, seven on the resource
+    Step 5 of the pre migration script, and the first part of the permission reduction of the
+    post migration script: the ten Azure roles of the deployment identity, seven on the resource
     group and three on the subscription. The function assigns a role that is absent and
-    removes nothing. With -ApplyLimit, the later run, the function writes the limit onto
+    removes nothing. With -ApplyLimit, the post migration script, the function writes the limit onto
     a Role Based Access Control Administrator assignment on the subscription that lacks
     it. Returns $true when the deployment identity holds all ten roles. The function
     records in the state whether the sign-in to Azure succeeded.
@@ -4100,11 +4100,11 @@ function Set-NeologikDeploymentAzureRole {
 
 function Invoke-NeologikPermissionReduction {
     <#
-    The last step of the later run: the permission reduction. The function first
+    The last step of the post migration script: the permission reduction. The function first
     confirms the ten Azure roles. The function removes nothing unless the deployment
-    identity holds all ten roles. The first run removes nothing: the deployment
-    identity keeps its wider access until the later run, so that Neologik can repair
-    a failed first run or a failed deployment with that access.
+    identity holds all ten roles. The pre migration script removes nothing: the deployment
+    identity keeps its wider access until the post migration script, so that Neologik can repair
+    a failed pre migration script or a failed deployment with that access.
     #>
     $state = $script:State
     $held = Set-NeologikDeploymentAzureRole -StepLabel 'Step 6 of 6: the permission reduction of the deployment identity' -ApplyLimit
@@ -4222,7 +4222,7 @@ function Write-NeologikSnapshot {
     <#
     Writes the snapshot file of the run: the state of the applications, the groups
     and the deployment identity as the run leaves them, with every item of the
-    summary. The first run writes the Pre snapshot and the later run the Post
+    summary. The pre migration script writes the Pre snapshot and the post migration script the Post
     snapshot. Neologik compares the two files to validate the migration. The
     snapshot holds no secret value. A snapshot that cannot be taken is one SKIPPED
     item; the run continues.
@@ -4551,7 +4551,7 @@ function Get-NeologikArmList {
 
 function Test-NeologikAzureQuota {
     <#
-    Step 5a of the first run: the quotas of the subscription, in the region of the
+    Step 5a of the pre migration script: the quotas of the subscription, in the region of the
     environment, that the migration needs. The step reads and changes nothing. Each
     check reports one summary item. A quota that is short reads SHORT and needs
     attention, so that Neologik and the administrator settle it before the migration:
@@ -4756,7 +4756,7 @@ function Test-NeologikModelQuota {
 }
 
 function Invoke-NeologikPreWindowRun {
-    # The first run: the checks. The first run removes nothing.
+    # The pre migration script: the checks. The pre migration script removes nothing.
     $state = $script:State
     Set-NeologikAgentBlueprint
     Set-NeologikDeploymentGraphRole
@@ -4775,7 +4775,7 @@ function Invoke-NeologikPreWindowRun {
 }
 
 function Invoke-NeologikPostWindowRun {
-    # The later run: the permission reduction.
+    # The post migration script: the permission reduction.
     Remove-NeologikRetiredGraphRole
     Invoke-NeologikPermissionReduction
 }
@@ -4812,7 +4812,7 @@ function Write-NeologikSummary {
     # A step that checks several things reports the item as one line, with the word
     # WOULD inside the line. The count takes each item that reports a change.
     $pending = @($script:Summary | Where-Object { $_.Result -match '\bWOULD ' })
-    $runName = if ((Get-NeologikProperty $state 'Run' '') -eq 'PostWindow') { 'The later run' } else { 'The first run' }
+    $runName = if ((Get-NeologikProperty $state 'Run' '') -eq 'PostWindow') { 'The post migration script' } else { 'The pre migration script' }
     # The summary file in JSON. The summary file holds the Microsoft Graph application
     # permissions that the deployment identity holds now, and every item of the run. The
     # function writes the summary file to the folder of the script. The summary file
@@ -4835,7 +4835,7 @@ function Write-NeologikSummary {
             exitReason           = [string]$script:ExitReason
             deploymentGraphRoles = @($heldRoles)
             expectedGraphRoles   = @($script:RequiredGraphRoles)
-            # The two role groups of the Neologik Context Engine (first run). Neologik
+            # The two role groups of the Neologik Context Engine (pre migration script). Neologik
             # records the NCE Admins group for the environment.
             nceContributorsGroupId = [string](Get-NeologikProperty $state 'NceContributorsGroupId' '')
             nceAdminsGroupId     = [string](Get-NeologikProperty $state 'NceAdminsGroupId' '')
