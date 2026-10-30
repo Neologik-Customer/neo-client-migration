@@ -42,7 +42,6 @@ This document has two readers.
 | [README.md](README.md) | This document. The place to start |
 | [docs/MIGRATION-SCRIPT-GUIDE.md](docs/MIGRATION-SCRIPT-GUIDE.md) | What the migration script checks and changes, run by run |
 | [docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md](docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md) | For Approvers. Each sign-in, each permission, each write and each file |
-| [docs/VERSION_HISTORY.md](docs/VERSION_HISTORY.md) | The versions of the migration package |
 | `LICENSE` | The licence for the migration package |
 
 ## The two runs
