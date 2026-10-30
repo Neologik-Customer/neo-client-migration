@@ -2082,7 +2082,7 @@ Context 'SharePoint consent and an earlier SharePoint application' {
         Add-EarlierSharePointApp
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be "MISSING: the SharePoint application of this environment does not exist. The earlier application 'Neologik SharePoint API Access' holds a SharePoint permission. Run the script again after the deployment by Neologik"
+        Get-SummaryResult 'SharePoint Sites.Selected consent' | Should -Be "MISSING: the SharePoint application of this environment does not exist. The application 'Neologik SharePoint API Access' holds a SharePoint permission. Run the script again after the deployment by Neologik"
         $script:Writes | Should -HaveCount 0
     }
 

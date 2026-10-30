@@ -40,7 +40,7 @@
 
     The grants for agents and Apps that work unattended in Microsoft 365 are not
     part of this script. The onboarding kit script Grant-NeologikAgentAccess.ps1
-    applies them, with the two files that the Neologik Context Engine exports.
+    applies them, with the agent grants file and the mailbox grants file.
 
     THE PRE MIGRATION SCRIPT
 
@@ -66,10 +66,10 @@
         - AgentIdentityBlueprint.AddRemoveCreds.All
 
     Step 2. The security groups, the Neologik guest users and the memberships.
-      The script confirms the four security groups of version 5 in this tenant:
+      The script confirms the four security groups in this tenant:
         - 'Neologik User Group - <short name>'
         - 'Neologik NCE Contributors - <short name>', the user group of the
-          Neologik Context Engine under its version 5 name. The script renames
+          Neologik Context Engine. The script renames
           'Neologik NCE User Group - <short name>'. The group keeps the id and
           the members.
         - 'Neologik NCE Admins - <short name>', the administrators of the
@@ -99,7 +99,7 @@
       The SharePoint application of the environment needs the Microsoft Graph
       application permission Sites.Selected. A consent belongs to one application.
       When the SharePoint application holds Sites.Selected, the script changes
-      nothing. When an earlier SharePoint application of Neologik in the tenant
+      nothing. When another SharePoint application of Neologik in the tenant
       holds a SharePoint permission, the script grants Sites.Selected to the
       SharePoint application of the environment. When the SharePoint application
       does not exist yet, run the script again after the deployment by Neologik.
@@ -131,9 +131,10 @@
       seven roles on the resource group and three roles on the subscription. The
       roles on the subscription are Reader, Cost Management Contributor and Role
       Based Access Control Administrator limited to three roles. The deployment uses
-      Cost Management Contributor for the daily cost report. The limited role lets
+      Cost Management Contributor, so that the deployment can delete a retired budget,
+      cost view or scheduled cost email. The limited role lets
       the deployment assign Reader, AppGw for Containers Configuration Manager and Cost Management Reader
-      to the identity of the ingress controller of a secure environment, and Cost
+      to the identity of the ingress controller of a Private Endpoint environment, and Cost
       Management Reader to the identity of the configuration API of the platform,
       and no other role. The script assigns a role that is absent and removes nothing.
       When the limited role is already held without the limit, the pre migration script
@@ -234,7 +235,7 @@
 
 .PARAMETER ConfigurationFile
     The configuration file that Install-NeologikEnvironment.ps1 wrote at onboarding.
-    The parameter is optional. The configuration file holds the tenant, the
+    The configuration file holds the tenant, the
     subscription, the resource group, the deployment identity, the Platform Sign-in
     application, the group ids and the solution names. The command from Neologik
     gives each value as a parameter, so the command needs no configuration file.
@@ -503,7 +504,7 @@ $script:RequiredRgRoles = @(
 # Install-NeologikEnvironment.ps1 assigns the same two roles.
 # Reader: the deployment reads usage and quota. Azure holds usage and quota for the
 # subscription and the region.
-# Cost Management Contributor: the deployment maintains the daily cost report. The
+# Cost Management Contributor: the deployment deletes any retired budget, cost view and scheduled cost email. The
 # role manages cost configuration only. The role gives no control of a resource.
 $script:RequiredSubRoles = @(
     'Reader',
@@ -565,7 +566,7 @@ $script:DeclaredResourceRoles = @('Cognitive Services Content Understanding Cont
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
 # The start of the name of the SharePoint application. The SharePoint application
 # holds the permission Sites.Selected. The script checks the consent in the first
-# run. The script grants Sites.Selected when an earlier SharePoint application of
+# run. The script grants Sites.Selected when another SharePoint application of
 # Neologik holds a SharePoint permission.
 $script:SharePointAppDisplayNamePrefix = 'Neologik SharePoint Access - '
 $script:AppAdminRoleTemplateId = '9b895d92-2cd3-44c7-9d02-a6ac2d5ea5c3'
@@ -623,7 +624,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.2'
+$script:ScriptVersion = '1.1.3'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -1747,7 +1748,7 @@ function Get-NeologikGraphScope {
         # The pre migration script adds the Neologik guest users and the signed-in administrator to
         # the security groups.
         $scopes += 'GroupMember.ReadWrite.All'
-        # The security groups of version 5, created when absent, and the Neologik
+        # The security groups, created when absent, and the Neologik
         # support accounts, invited as guests when absent.
         $scopes += 'Group.ReadWrite.All'
         $scopes += 'User.Invite.All'
@@ -2337,7 +2338,7 @@ function Set-NeologikDeploymentGraphRole {
 function Remove-NeologikRetiredGraphRole {
     <#
     Step 6a of the post migration script: the Microsoft Graph application permissions that the
-    deployment identity no longer needs. The function first confirms the two
+    deployment identity does not need. The function first confirms the two
     permissions that the deployment identity keeps, and removes the other permissions
     only when the deployment identity holds both.
     #>
@@ -2441,13 +2442,12 @@ function Find-NeologikUserByEmail {
 
 function Set-NeologikSecurityGroup {
     <#
-    Step 2 of the pre migration script. The security groups of version 5 of the Neologik
+    Step 2 of the pre migration script. The security groups of the Neologik
     Platform exist in this tenant, the Neologik support accounts are guests of the
     tenant, each guest and the signed-in administrator are members of every group,
     and the two role groups of the Neologik Context Engine are known for step 3.
-    The onboarding script does the same work for a new environment. An environment
-    that was set up before version 5 has two of the four groups, so this step
-    creates the other two, renames the user group of the Neologik Context Engine
+    The onboarding script does the same work for a new environment. This step
+    creates each group that is absent, renames the user group of the Neologik Context Engine
     and fills the memberships. The step changes no group that already matches.
     #>
     $state = $script:State
@@ -2498,8 +2498,8 @@ function Set-NeologikSecurityGroup {
             $groupId = [string](Get-NeologikProperty $group 'id' '')
             $currentName = [string](Get-NeologikProperty $group 'displayName' '')
             if ($currentName -ne $definition.Name) {
-                # The group keeps the id and the members. The display name moves to the
-                # version 5 name.
+                # The group keeps the id and the members. The display name changes to the
+                # name in the definition.
                 if (Test-NeologikVerifyOnly) {
                     Write-Log "  '$currentName': WOULD RENAME to '$($definition.Name)'" -Level Warning
                     $renamed += "WOULD RENAME '$currentName'"
@@ -2852,11 +2852,11 @@ function Get-NeologikSharePointApplication {
 
 function Get-NeologikEarlierSharePointApplication {
     <#
-    Finds each earlier SharePoint application of Neologik that holds a SharePoint
-    permission of Microsoft Graph. An earlier SharePoint application is a service
+    Finds each other SharePoint application of Neologik that holds a SharePoint
+    permission of Microsoft Graph. Such an application is a service
     principal whose name begins 'Neologik' and holds the word 'SharePoint'. The
     function leaves out the SharePoint application of every environment. The result
-    lists each earlier application with the SharePoint permissions that the
+    lists each such application with the SharePoint permissions that the
     application holds.
     #>
     param([string]$ExcludeId)
@@ -2885,7 +2885,7 @@ function Get-NeologikEarlierSharePointApplication {
 function Test-NeologikSharePointConsent {
     <#
     Checks the consent for Sites.Selected of the SharePoint application of this
-    environment. A consent belongs to one application. An earlier SharePoint
+    environment. A consent belongs to one application. Another SharePoint
     application of Neologik that holds a SharePoint permission shows that the
     solution uses SharePoint ingestion. The function then grants Sites.Selected to
     the SharePoint application of this environment. -IngestionRecorded states that
@@ -2919,10 +2919,10 @@ function Test-NeologikSharePointConsent {
         $earlier = @(Get-NeologikEarlierSharePointApplication -ExcludeId $spId)
         if ($earlier.Count -gt 0) {
             $earlierNames = @($earlier | ForEach-Object { "'$($_.Name)'" }) -join ', '
-            Write-Log "  An earlier SharePoint application of Neologik holds a SharePoint permission: $earlierNames. The solution uses SharePoint ingestion" -Level Info
+            Write-Log "  Another SharePoint application of Neologik holds a SharePoint permission: $earlierNames. The solution uses SharePoint ingestion" -Level Info
             if (-not $spApp) {
                 Write-Log '  The SharePoint application of this environment does not exist. The deployment by Neologik creates the SharePoint application. Run the script again after the deployment' -Level Warning
-                Add-Summary $item "MISSING: the SharePoint application of this environment does not exist. The earlier application $earlierNames holds a SharePoint permission. Run the script again after the deployment by Neologik"
+                Add-Summary $item "MISSING: the SharePoint application of this environment does not exist. The application $earlierNames holds a SharePoint permission. Run the script again after the deployment by Neologik"
                 return
             }
             if (-not $sitesSelected) {
@@ -2930,7 +2930,7 @@ function Test-NeologikSharePointConsent {
                 Add-Summary $item 'NOT FOUND: report to Neologik'
                 return
             }
-            Write-Log "  '$spName' does not hold Sites.Selected. A consent belongs to one application. The consent of the earlier application does not reach '$spName'" -Level Info
+            Write-Log "  '$spName' does not hold Sites.Selected. A consent belongs to one application. The consent of the other application does not reach '$spName'" -Level Info
             if (Test-NeologikVerifyOnly) {
                 Add-NeologikPendingChange $item "GRANT Sites.Selected to '$spName'"
                 return
@@ -2972,7 +2972,7 @@ function Test-NeologikPreWindowSharePointConsent {
     Step 4a of the pre migration script. The configuration file can record whether the
     solution uses SharePoint ingestion, in the field "SharePointIngestion". When
     the configuration file does not hold the field, the script reads the SharePoint
-    permissions in the directory. An earlier SharePoint application of Neologik
+    permissions in the directory. Another SharePoint application of Neologik
     that holds a SharePoint permission shows that the solution uses SharePoint
     ingestion.
     #>
@@ -3508,7 +3508,7 @@ function Set-NeologikLimitedAzureRoleAssignment {
     Assigns the role Role Based Access Control Administrator to the deployment identity
     on the subscription, with the condition that limits the roles the deployment
     identity may assign. An assignment that carries the condition is reported, not
-    recreated. An assignment without the condition, or with an earlier condition, is
+    recreated. An assignment without the condition, or with a different condition, is
     wider than the deployment needs: the pre migration script reports it and keeps it, because the
     pre migration script removes nothing; the post migration script, with -ApplyLimit, removes the assignment
     and creates it again with the condition, because Azure keeps the condition of an
@@ -3721,7 +3721,7 @@ function Remove-NeologikAdminGroupMembership {
     $label = 'Admin User Group membership'
     if (-not $state.AdminGroupId -and $state.ShortName) {
         # The post migration script makes none of the group checks of the pre migration script, so the function
-        # finds the Admin User Group by its version 5 name when the command gives no id.
+        # finds the Admin User Group by its name when the command gives no id.
         try {
             $adminGroup = Get-NeologikGroupByName -DisplayName "Neologik Admin User Group - $($state.ShortName)"
             if ($adminGroup) { $state.AdminGroupId = [string](Get-NeologikProperty $adminGroup 'id' '') }
@@ -3800,8 +3800,7 @@ function Test-NeologikDirectoryObjectExists {
 
 function Remove-NeologikOrphanedRoleAssignment {
     # Step 6h: the function removes every role assignment on the resource group whose
-    # identity is gone from Microsoft Entra ID. A migration retires the identities of
-    # the previous platform version. A role assignment outlives the identity it was
+    # identity is gone from Microsoft Entra ID. A role assignment outlives the identity it was
     # made for. It grants nothing, and the Azure portal shows it as "Identity not
     # found". Only assignments made on the resource group itself are read. An
     # assignment inherited from the subscription is never touched. Azure reports the
@@ -4145,7 +4144,7 @@ function Invoke-NeologikPermissionReduction {
     Remove-NeologikUndeclaredGroupMembership
 
     # Step 6h: remove the role assignments on the resource group whose identity is
-    # gone, left by the identities that the migration retired.
+    # gone.
     Remove-NeologikOrphanedRoleAssignment
 
     # Step 6i: the script runner identity. Reader on the resource group, then the removal
