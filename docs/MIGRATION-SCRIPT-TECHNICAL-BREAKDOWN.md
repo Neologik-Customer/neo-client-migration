@@ -20,7 +20,7 @@ The migration script moves one existing Neologik Platform environment to version
 | Subject | Position |
 |---|---|
 | Resource group | Seven roles: Contributor, Key Vault Certificates Officer, Key Vault Secrets Officer, Storage Blob Data Contributor, Azure Kubernetes Service RBAC Cluster Admin, Monitoring Contributor and Role Based Access Control Administrator |
-| Subscription | Three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited by a condition to assigning three roles, Reader, AppGw for Containers Configuration Manager and Cost Management Reader. None of the three allows a change to an Azure resource |
+| Subscription | Three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited by a condition to assigning three roles, Reader, AppGw for Containers Configuration Manager and Cost Management Reader. These roles change no Azure resource other than cost configuration, support requests and assignments of the three assignable roles |
 | A resource in the resource group | Cognitive Services Content Understanding Contributor on the Content Understanding account, granted by the deployment |
 | Microsoft Graph | Two application permissions: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Entra ID | No directory role and no group membership |
@@ -93,7 +93,7 @@ Before the migration script changes anything in the directory, the signed-in acc
 | Input | Content |
 |---|---|
 | Command-line parameters | The version of the onboarding kit that the migration brings the environment to (`-KitVersion`, required). The tenant, the deployment identity, the solution name and the short name, the Platform Sign-in application, the SharePoint application, each agent registration, the two groups, the subscription and the resource group. The switches `-LaterRun`, `-Verify` and `-UseAzureCliToken`. The storage account for the upload |
-| `-ConfigurationFile`, optional | The configuration file that the onboarding wrote. The command from Neologik gives each value as a parameter, so the command needs no configuration file |
+| `-ConfigurationFile` | The configuration file that the onboarding wrote. The command from Neologik gives each value as a parameter, so the command needs no configuration file |
 | `NeologikGuestUsers.txt` | The Neologik support accounts that the pre migration script confirms as guests of the tenant. The file is beside the script, or `-GuestUsersFile` names the file |
 
 The migration script checks each input before the first sign-in: each id is a GUID, the kit version is a version in the form `vX.Y.P`, and each file exists and parses. A wrong input stops the run before the migration script contacts anything.
@@ -176,7 +176,7 @@ The migration script writes the files to its own folder, else to the current fol
 - The migration script never gives administrator consent.
 - The migration script never changes an application registration that the command does not name by client id.
 - The migration script never removes a wider role before the deployment identity holds every narrower role.
-- The migration script never grants access to an agent or an App. The grants script of the onboarding kit, `Grant-NeologikAgentAccess.ps1`, does that with the files that the Neologik Context Engine exports.
+- The migration script never grants access to an agent or an App. The grants script of the onboarding kit, `Grant-NeologikAgentAccess.ps1`, does that with the agent grants file and the mailbox grants file.
 - The migration script never signs in as a service principal and never stores a token.
 - With `-Verify`, the migration script writes nothing. Every write passes through one of two functions that refuse the write in a run with `-Verify`.
 
