@@ -25,7 +25,7 @@ This document has two readers.
 
 | Term | Meaning |
 |---|---|
-| Neologik Context Engine | The administration web application of the Neologik Platform. Platform operators configure agents and Apps there |
+| Neologik Context Engine | The administration web application of the Neologik Platform. The web application shows the name **Neologik Admin Tool** on screen. Platform operators configure agents and Apps there |
 | Deployment identity | The service principal that Neologik signs in with to deploy the Neologik Platform into your resource group |
 | Migration script | `Migrate-NeologikEnvironment.ps1` |
 | Onboarding kit | The set of scripts and documents that Neologik gives a new customer. The onboarding kit holds the grants script, `Grant-NeologikAgentAccess.ps1`, which this migration package does not hold |
@@ -42,7 +42,6 @@ This document has two readers.
 | [README.md](README.md) | This document. The place to start |
 | [docs/MIGRATION-SCRIPT-GUIDE.md](docs/MIGRATION-SCRIPT-GUIDE.md) | What the migration script checks and changes, run by run |
 | [docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md](docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md) | For Approvers. Each sign-in, each permission, each write and each file |
-| [docs/VERSION_HISTORY.md](docs/VERSION_HISTORY.md) | The versions of the migration package |
 | `LICENSE` | The licence for the migration package |
 
 ## The two runs
@@ -54,7 +53,7 @@ This document has two readers.
 
 The pre migration script removes nothing. The deployment identity keeps the access it holds today until the post migration script. Between the two runs, Neologik can put right a failed pre migration script or a failed deployment with that access.
 
-The grants for agents and Apps that work unattended in Microsoft 365 are not part of the migration script. When an agent or an App of the migrated environment is to work unattended, a Global Administrator runs the grants script of the onboarding kit, `Grant-NeologikAgentAccess.ps1`, with the files that the Neologik Context Engine exports.
+The grants for agents and Apps that work unattended in Microsoft 365 are not part of the migration script. When an agent or an App of the migrated environment is to work unattended, a Global Administrator runs the grants script of the onboarding kit, `Grant-NeologikAgentAccess.ps1`, with the agent grants file and the mailbox grants file.
 
 ## Before you start
 
