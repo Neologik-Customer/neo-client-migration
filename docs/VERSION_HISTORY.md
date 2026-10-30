@@ -13,7 +13,8 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 1.1.3](#version-113)
+2. [Version 1.1.4](#version-114)
+3. [Version 1.1.3](#version-113)
 3. [Version 1.1.2](#version-112)
 3. [Version 1.1.1](#version-111)
 4. [Version 1.1.0](#version-110)
@@ -28,6 +29,17 @@ This document lists the versions of the Neologik migration package. For each ver
 | Script | Version of the script | Purpose |
 |---|---|---|
 | `Migrate-NeologikEnvironment.ps1` | 1.1.3 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.4
+
+**Date**: 2026-10-30
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| `NeologikGuestUsers.txt` | One Neologik support account is added. The list now holds the same accounts as the onboarding kit |
+| `Migrate-NeologikEnvironment.ps1` | The version number moves to 1.1.4. The code is unchanged |
 
 ## Version 1.1.3
 
