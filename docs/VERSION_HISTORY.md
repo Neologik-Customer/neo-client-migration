@@ -13,7 +13,8 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
-2. [Version 1.1.2](#version-112)
+2. [Version 1.1.3](#version-113)
+3. [Version 1.1.2](#version-112)
 3. [Version 1.1.1](#version-111)
 4. [Version 1.1.0](#version-110)
 5. [Version 1.0.4](#version-104)
@@ -26,7 +27,18 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.2 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.3 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.3
+
+**Date**: 2026-10-30
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | Comments, help text and on-screen messages only. The text states each fact at this version. `Compare-Code.ps1` proves the code unchanged |
+| Documents | The documents state each fact at this version |
 
 ## Version 1.1.2
 
@@ -38,7 +50,7 @@ This version applies to an environment on Neologik Platform version 5.0 or versi
 |---|---|
 | `Migrate-NeologikEnvironment.ps1` | Wording only. The two runs of the migration script have fixed names: the pre migration script, the run before the migration window, and the post migration script, the run after Neologik has proven the environment, selected with `-LaterRun`. The messages, the summary and the help of the script use the two names. The parameter `-LaterRun`, the file names `PreWindow` and `PostWindow` and the code are unchanged |
 | `MIGRATION-SCRIPT-GUIDE.md`, `MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md`, `README.md` | The documents use the two names |
-| Documents | `README.md`, `MIGRATION-SCRIPT-GUIDE.md` and `MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` change for Neologik Platform version 5.1. The documents name the agent grants file and the mailbox grants file. The table of terms gives the on-screen name Neologik Admin Tool. The guide states that the post migration script removes the limited role assignment and creates the assignment again. The guide states what step 5 leaves unchanged. The technical breakdown states what the three roles on the subscription change. The documents state each fact at this version, with no comparison with an earlier version. The version history stays out of the customer download, as in the onboarding kit. No script changes |
+| Documents | `README.md`, `MIGRATION-SCRIPT-GUIDE.md` and `MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` change for Neologik Platform version 5.1. The documents name the agent grants file and the mailbox grants file. The table of terms gives the on-screen name Neologik Admin Tool. The guide states that the post migration script removes the limited role assignment and creates the assignment again. The guide states what step 5 leaves unchanged. The technical breakdown states what the three roles on the subscription change. The documents state each fact at this version, with no comparison with an earlier version. The version history stays out of the customer download, as in the onboarding kit |
 
 ## Version 1.1.1
 
