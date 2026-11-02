@@ -27,6 +27,7 @@ This document has two readers.
 |---|---|
 | Neologik Context Engine | The administration web application of the Neologik Platform. The web application shows the name **Neologik Admin Tool** on screen. Platform operators configure agents and Apps there |
 | Deployment identity | The service principal that Neologik signs in with to deploy the Neologik Platform into your resource group |
+| Directory managed identity | The managed identity that, from version 5.2 of the Neologik Platform, creates and changes the application registrations of agents from inside your environment |
 | Migration script | `Migrate-NeologikEnvironment.ps1` |
 | Onboarding kit | The set of scripts and documents that Neologik gives a new customer. The onboarding kit holds the grants script, `Grant-NeologikAgentAccess.ps1`, which this migration package does not hold |
 | Short name | The organisation code, the environment type and the environment index, joined together. An example is `abcprd01` |
@@ -48,8 +49,8 @@ This document has two readers.
 
 | Run | When Neologik asks for the run | What the migration script does |
 |---|---|---|
-| The pre migration script | Before the environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Removes nothing |
-| The post migration script | After Neologik has deployed and proven the environment | Reduces the access of the deployment identity to the roles that the deployment identity needs |
+| The pre migration script | Before the environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Adds one federated credential to the deployment identity. Creates the directory managed identity. Removes nothing |
+| The post migration script | After Neologik has deployed and proven the environment | Reduces the access of the deployment identity to the roles that the deployment identity needs. Confirms the federated credential and the directory managed identity, and adds what is absent |
 
 The pre migration script removes nothing. The deployment identity keeps the access it holds today until the post migration script. Between the two runs, Neologik can put right a failed pre migration script or a failed deployment with that access.
 
@@ -62,8 +63,8 @@ The grants for agents and Apps that work unattended in Microsoft 365 are not par
 | PowerShell | PowerShell 7.4 or later. Windows PowerShell 5.1 cannot run the migration script |
 | Workstation | A desktop and a browser, for the sign-in |
 | Microsoft Entra role | **Global Administrator** in your tenant |
-| Azure role | **Owner** or **User Access Administrator** on the subscription of the environment. The migration script assigns and, in the post migration script, removes Azure roles |
-| The command from Neologik | The command names your tenant, your subscription, your resource group, the application registrations of the environment and the version of the onboarding kit that the migration brings your environment to |
+| Azure role | **Owner** on the subscription of the environment. The migration script assigns and, in the post migration script, removes Azure roles. The migration script also creates the directory managed identity on the resource group |
+| The command from Neologik | The command names your tenant, your subscription, your resource group and the application registrations of the environment. The command also names the environment, the directory managed identity and the version of the onboarding kit that the migration brings your environment to |
 
 The migration script installs the PowerShell modules that the run needs, for your user account, when the modules are missing.
 
@@ -81,7 +82,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 The first command removes the mark that Windows puts on a downloaded file. Without it, PowerShell refuses the script with the words `not digitally signed`. The second command lifts the execution policy for the current PowerShell window only. If PowerShell still refuses a script with the words `not digitally signed`, the execution policy is set by Group Policy, which the command above cannot change. Run `Get-ExecutionPolicy -List`: a value other than `Undefined` on the `MachinePolicy` or `UserPolicy` row confirms it. An administrator of that policy allows `RemoteSigned` for the workstation, or you run the scripts from a workstation without the policy.
 
 4. Paste the command from Neologik and press Enter.
-5. The migration script opens the sign-in page in your browser. Sign in as a Global Administrator who also holds Owner or User Access Administrator on the subscription. The migration script then signs in to Azure with the same account. When the browser sign-in does not complete, the migration script prints a web address and a code to enter in a browser on any device.
+5. The migration script opens the sign-in page in your browser. Sign in as a Global Administrator who also holds Owner on the subscription. The migration script then signs in to Azure with the same account. When the browser sign-in does not complete, the migration script prints a web address and a code to enter in a browser on any device.
 6. Read the summary table on screen and the list `FILES TO SEND TO NEOLOGIK` under it. Send the files to Neologik, unless the list says that the run uploaded them.
 
 To see what a run would change, add `-Verify` to the end of the command. The migration script reports each pending change as `WOULD` and writes nothing.
