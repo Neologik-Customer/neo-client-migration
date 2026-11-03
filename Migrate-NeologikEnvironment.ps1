@@ -79,6 +79,8 @@
       -NceUserGroupId and -AdminGroupId. The id decides, whatever the name. A
       group whose name begins 'Neologik' gets the name in this list, and keeps
       the id and the members. A group with a name of your own keeps the name.
+      A user group with a name of your own stays as it is, with no new member.
+      The script then finds or creates 'Neologik User Group - <short name>'.
       The script creates a group that is absent. The script then confirms that
       each Neologik support account in NeologikGuestUsers.txt is a guest of the
       tenant, and invites an account that is absent. Last, the script confirms
@@ -315,7 +317,9 @@
     whose members use the Neologik agents. The command from Neologik gives the
     value for an environment that was set up before version 5. The script finds
     the group by the id. A group whose name begins 'Neologik' gets that name.
-    Without the parameter the script finds the group by that name.
+    A group with a name of your own stays as it is, with no new member, and
+    the script finds or creates the group by that name instead. Without the
+    parameter the script finds the group by that name.
 
 .PARAMETER NceUserGroupId
     The object id of the security group whose members sign in to the Neologik
@@ -2562,6 +2566,7 @@ function Set-NeologikSecurityGroup {
     $created = @()
     $renamed = @()
     $kept = @()
+    $notUsed = @()
     $pendingCreate = @()
     $failed = @()
     foreach ($definition in $definitions) {
@@ -2570,6 +2575,16 @@ function Set-NeologikSecurityGroup {
             if ($definition.GivenId) {
                 # The command names the group by id. The id decides, whatever the name.
                 $group = Invoke-NeologikGraph -Method GET -Uri "$graph/groups/$($definition.GivenId)?`$select=id,displayName"
+                $givenName = [string](Get-NeologikProperty $group 'displayName' '')
+                if ($group -and $definition.Key -eq 'UserGroup' -and -not $givenName.StartsWith('Neologik ', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    # Every Neologik guest joins the user group. A group with a name of the
+                    # organisation's own stays as it is, with no new member, so the script
+                    # finds or creates the user group by name instead.
+                    Write-Log "  '$givenName': the group that -UserGroupId names has a name of the organisation's own. The script leaves the group as it is and uses '$($definition.Name)'" -Level Info
+                    $notUsed += "'$givenName'"
+                    $state.UserGroupId = ''
+                    $group = $null
+                }
             }
             if (-not $group) { $group = Get-NeologikGroupByName -DisplayName $definition.Name }
             if (-not $group) {
@@ -2657,6 +2672,7 @@ function Set-NeologikSecurityGroup {
     if ($created.Count -gt 0) { $parts += "Created: $($created -join ', ')" }
     if ($renamed.Count -gt 0) { $parts += "Renamed: $($renamed -join ', ')" }
     if ($kept.Count -gt 0) { $parts += "Kept the name: $($kept -join ', ')" }
+    if ($notUsed.Count -gt 0) { $parts += "Not used, a name of the organisation's own: $($notUsed -join ', ')" }
     if ($pendingCreate.Count -gt 0) { $parts += "WOULD CREATE: $($pendingCreate -join ', ')" }
     if ($failed.Count -gt 0) { $parts += "FAILED: $($failed -join '; ')" }
     Add-Summary 'Security groups' ($parts -join '. ')

@@ -3085,16 +3085,35 @@ Context 'The pre migration script: security groups, guests and memberships (step
         $script:Writes | Should -Not -Contain "POST group Neologik User Group - $script:ShortName"
     }
 
-    It 'keeps the name of a group that the command names by id when the name is not a Neologik name (project#3787)' {
-        # The group of an earlier channel can be a group of the organisation's own.
-        # The script adopts the group and changes no name.
+    It 'leaves a user group with a name of the organisation''s own as it is and uses the Neologik User Group (project#3787)' {
+        # The group of an earlier channel can be a group of the organisation's own, such
+        # as All Staff. No Neologik guest may join that group.
         Add-CompliantPreWindowState
-        (Get-FakeGroup -Id $script:Ids.UserGroup).displayName = 'All Staff'
+        $allStaff = Get-FakeGroup -Id $script:Ids.UserGroup
+        $allStaff.displayName = 'All Staff'
+        $allStaff.members = @(@{ id = $script:Ids.Me })
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UserGroupId = $script:Ids.UserGroup }
         $code | Should -Be 0
+        $allStaff.displayName | Should -Be 'All Staff'
+        @($allStaff.members) | Should -HaveCount 1
+        @($script:Writes | Where-Object { $_ -like 'PATCH group All Staff*' -or $_ -like 'POST group member All Staff *' }) | Should -HaveCount 0
+        $script:Writes | Should -Contain "POST group Neologik User Group - $script:ShortName"
+        (Get-SummaryResult 'Security groups') | Should -Be "Present: 3. Created: Neologik User Group - $script:ShortName. Not used, a name of the organisation's own: 'All Staff'"
+        $created = @($script:Tenant.Groups | Where-Object { $_.displayName -eq "Neologik User Group - $script:ShortName" })
+        $created | Should -HaveCount 1
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PreWindow_*.json')
+        $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        $json.userGroupId | Should -Be $created[0].id
+    }
+
+    It 'keeps the name of an Admin User Group that the command names by id when the name is not a Neologik name (project#3787)' {
+        Add-CompliantPreWindowState
+        (Get-FakeGroup -Id $script:Ids.AdminGroup).displayName = 'IT Administrators'
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AdminGroupId = $script:Ids.AdminGroup }
+        $code | Should -Be 0
         $script:Writes | Should -HaveCount 0
-        (Get-FakeGroup -Id $script:Ids.UserGroup).displayName | Should -Be 'All Staff'
-        (Get-SummaryResult 'Security groups') | Should -Be "Present: 3. Kept the name: 'All Staff'"
+        (Get-FakeGroup -Id $script:Ids.AdminGroup).displayName | Should -Be 'IT Administrators'
+        (Get-SummaryResult 'Security groups') | Should -Be "Present: 3. Kept the name: 'IT Administrators'"
     }
 
     It 'records the user group found by name in the summary file when the command gives no id (project#3787)' {

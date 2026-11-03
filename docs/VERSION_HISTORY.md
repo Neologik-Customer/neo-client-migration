@@ -41,7 +41,7 @@ This version applies to an environment on Neologik Platform version 5.0 or versi
 | Item | Change |
 |---|---|
 | `Migrate-NeologikEnvironment.ps1` | The command can name the user group by id, with `-UserGroupId`. The pre migration script then finds the user group under an earlier name, gives the group the current name and creates no second user group. The command from Neologik gives the value |
-| `Migrate-NeologikEnvironment.ps1` | A group that the command names by id keeps the name when the name does not begin `Neologik` |
+| `Migrate-NeologikEnvironment.ps1` | A group that the command names by id keeps the name when the name does not begin `Neologik`. A user group with such a name stays as it is and gains no member: the pre migration script finds or creates `Neologik User Group - <short name>` instead |
 | `Migrate-NeologikEnvironment.ps1` | The summary file and the snapshot file record the user group |
 | `MIGRATION-SCRIPT-GUIDE.md` and `MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` | Both documents describe the groups that the command names by id |
 
