@@ -95,7 +95,7 @@ The Neologik Platform uses four security groups in your tenant. The migration sc
 | The Neologik support accounts | Each mail address in `NeologikGuestUsers.txt` is a guest of your tenant | The migration script invites an account that is absent. Microsoft sends the invitation |
 | The memberships | Each guest and the signed-in administrator are direct members of every one of the four groups | The migration script adds a membership that is absent. The migration script removes no member |
 
-When the command names a group by id, the id decides, whatever the name of the group. When the command names no id, the migration script finds the group by name.
+The command can name three of the groups by id: the user group, the user group of the Neologik Context Engine and the Admin User Group. When the command names a group by id, the id decides, whatever the name of the group. A group whose name begins `Neologik` gets the name in the table, and keeps the id and the members. For example, `Neologik User Group - abc-prd` becomes `Neologik User Group - abcprd01`. A group with a name of your own keeps the name. When the command names no id, the migration script finds the group by name.
 
 The summary item `NCE Admins group` states the id of the group. Neologik records the id for the environment, so that members of the group hold the administrator role in the Neologik Context Engine.
 
