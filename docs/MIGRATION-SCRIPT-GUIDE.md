@@ -138,7 +138,7 @@ Step 5 changes no managed identity, no security group and no user. The pre migra
 
 ### Step 5b: The directory managed identity
 
-This step prepares your environment for version 5.2 of the Neologik Platform. From that version, the Neologik Platform creates and changes the application registrations of agents from inside your environment. The move to version 5.2 then needs no further step from your administrator.
+This step prepares your environment for version 5.2 of the Neologik Platform. From that version, the Neologik Platform creates and changes the application registrations of Neologik agents from inside your environment. The move to version 5.2 then needs no further step from your administrator.
 
 | Item | What the migration script does |
 |---|---|
