@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.5](#version-115)
 2. [Version 1.1.4](#version-114)
 3. [Version 1.1.3](#version-113)
 3. [Version 1.1.2](#version-112)
@@ -28,7 +29,20 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.3 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.5 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.5
+
+**Date**: 2026-11-02
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1. This version prepares your environment for version 5.2 of the Neologik Platform, so the move to version 5.2 needs no further step from your administrator.
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | Step 4c adds one federated credential to the application registration of the deployment identity. Step 5b creates the directory managed identity, grants the Microsoft Graph application permission `Application.ReadWrite.OwnedBy` and adds the managed identity as an owner of each agent registration. The post migration script confirms both |
+| `Migrate-NeologikEnvironment.ps1` | The command needs two new values, `-DirectoryIdentityName` and `-EnvironmentName`. The command from Neologik gives both |
+| `Migrate-NeologikEnvironment.ps1` | The script records the version of the onboarding kit only when steps 4c and 5b are complete |
+| `MIGRATION-SCRIPT-GUIDE.md` and `MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` | Both documents describe the new steps. The signed-in account needs Owner on the subscription |
 
 ## Version 1.1.4
 
