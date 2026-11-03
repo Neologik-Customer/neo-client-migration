@@ -68,6 +68,13 @@ The grants for agents and Apps that work unattended in Microsoft 365 are not par
 
 The migration script installs the PowerShell modules that the run needs, for your user account, when the modules are missing.
 
+**The public address of a Standard environment changes at the migration.** A Standard environment is one whose entry point is a load balancer with a public IP address. The migration moves the entry point to a new static public IP address, which then stays with the environment. Until the DNS record for the host name points at the new address, users cannot reach the environment by name. Before the migration window:
+
+1. Name the person who manages the DNS zone of the host name to Neologik, and agree that the person is available at the end of the window.
+2. Ask that person to lower the time to live of the DNS record for the host name to 300 seconds, at least one day before the window. The change then reaches users within five minutes.
+
+A Private Endpoint environment, whose entry point is Application Gateway for Containers, keeps its entry point. Neologik tells you when the record of a Private Endpoint environment changes.
+
 ## Run the migration script
 
 1. Extract the migration package to a folder, for example `C:\Neologik`. A zip downloaded from GitHub extracts to a folder inside the folder you choose, named `neo-client-migration-main`. The script is in that inner folder. Keep the files together: the pre migration script reads `NeologikGuestUsers.txt` from the folder of the migration script.
@@ -90,6 +97,8 @@ To see what a run would change, add `-Verify` to the end of the command. The mig
 [MIGRATION-SCRIPT-GUIDE.md](docs/MIGRATION-SCRIPT-GUIDE.md) describes each step of each run.
 
 ## After the migration
+
+At the end of the migration window of a Standard environment, Neologik sends the new public IP address. The person who manages your DNS changes the A record for the host name to that address. Users reach the environment by name once the change has reached their resolvers, within five minutes when the time to live was lowered beforehand.
 
 Neologik tells you when the environment is proven. Neologik then sends the command of the post migration script. After the post migration script, the deployment identity holds the access that [MIGRATION-SCRIPT-GUIDE.md](docs/MIGRATION-SCRIPT-GUIDE.md) lists and nothing else.
 
