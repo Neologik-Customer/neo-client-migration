@@ -1130,6 +1130,21 @@ Context 'Input validation (nothing is contacted when an input is wrong)' {
         Should -Invoke Connect-MgGraph -Times 0
     }
 
+    It 'rejects a UserGroupId that is not a GUID before contacting anything (project#3787)' {
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UserGroupId = 'not-a-guid' }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'UserGroupId must be a GUID'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
+    It 'refuses one group id under UserGroupId and NceUserGroupId before contacting anything (project#3787)' {
+        # One group under two parameters would be renamed back and forth on every run.
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UserGroupId = $script:Ids.Group; NceUserGroupId = $script:Ids.Group }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'UserGroupId and NceUserGroupId name the same group'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
     It 'refuses a run without -KitVersion, or with a value that is not a version, before contacting anything' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); KitVersion = '' }
         $code | Should -Be 1
@@ -2890,6 +2905,7 @@ Context 'Parameter surface' {
         $names | Should -Contain 'Verify'
         $names | Should -Contain 'KitVersion'
         $names | Should -Contain 'LaterRun'
+        $names | Should -Contain 'UserGroupId'
         # The grants are the work of Grant-NeologikAgentAccess.ps1 in the onboarding kit (project#3192).
         $names | Should -Not -Contain 'AgentGrantsFile'
         $names | Should -Not -Contain 'MailboxGrantsFile'
@@ -3018,6 +3034,95 @@ Context 'The pre migration script: security groups, guests and memberships (step
         $script:Writes | Should -HaveCount 0
         Get-SummaryResult 'User group assignment' | Should -Be 'Already assigned'
         Get-SummaryResult 'Admin group assignment' | Should -Be 'Already assigned'
+    }
+
+    It 'finds the user group by the id in the command, gives the group the version 5 name and creates no second group (project#3787)' {
+        # An environment set up before version 5 can hold the user group under an older
+        # Neologik name, as sasdev holds 'Neologik User Group Neologik - sas-dev'.
+        Add-CompliantPreWindowState
+        (Get-FakeGroup -Id $script:Ids.UserGroup).displayName = 'Neologik User Group Neologik - x-dev'
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UserGroupId = $script:Ids.UserGroup }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain "PATCH group Neologik User Group Neologik - x-dev displayName=Neologik User Group - $script:ShortName"
+        $script:Writes | Should -Not -Contain "POST group Neologik User Group - $script:ShortName"
+        @($script:Tenant.Groups | Where-Object { $_.displayName -like 'Neologik User Group*' }) | Should -HaveCount 1
+        (Get-SummaryResult 'Security groups') | Should -Be "Present: 3. Renamed: Neologik User Group - $script:ShortName"
+        ($script:Console -join "`n") | Should -Match ('Neologik User Group:\s+' + [regex]::Escape($script:Ids.UserGroup))
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PreWindow_*.json')
+        $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        $json.userGroupId | Should -Be $script:Ids.UserGroup
+        $snapshots = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_Snapshot_Pre_*.json')
+        $snapshot = Get-Content -LiteralPath $snapshots[0].FullName -Raw | ConvertFrom-Json
+        @($snapshot.groups | Where-Object { $_.id -eq $script:Ids.UserGroup }) | Should -HaveCount 1
+
+        $script:Writes = @()
+        $script:Summary = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UserGroupId = $script:Ids.UserGroup }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        (Get-SummaryResult 'Security groups') | Should -Be 'Present: 4'
+    }
+
+    It 'reports the rename of the user group with -Verify and writes nothing (project#3787)' {
+        Add-CompliantPreWindowState
+        (Get-FakeGroup -Id $script:Ids.UserGroup).displayName = 'Neologik User Group Neologik - x-dev'
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UserGroupId = $script:Ids.UserGroup; Verify = $true }
+        $code | Should -Be 1
+        $script:Writes | Should -HaveCount 0
+        (Get-SummaryResult 'Security groups') | Should -Be "Present: 3. Renamed: WOULD RENAME 'Neologik User Group Neologik - x-dev'"
+    }
+
+    It 'takes the id of the user group from the configuration file (project#3787)' {
+        Add-CompliantPreWindowState
+        (Get-FakeGroup -Id $script:Ids.UserGroup).displayName = 'Neologik User Group Neologik - x-dev'
+        $securityGroups = @(
+            @{ Name = 'Neologik User Group Neologik - x-dev'; Id = $script:Ids.UserGroup },
+            @{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.Group },
+            @{ Name = "Neologik Admin User Group - $script:ShortName"; Id = $script:Ids.AdminGroup })
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile -Overrides @{ SecurityGroups = $securityGroups }) }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain "PATCH group Neologik User Group Neologik - x-dev displayName=Neologik User Group - $script:ShortName"
+        $script:Writes | Should -Not -Contain "POST group Neologik User Group - $script:ShortName"
+    }
+
+    It 'leaves a user group with a name of the organisation''s own as it is and uses the Neologik User Group (project#3787)' {
+        # The group of an earlier channel can be a group of the organisation's own, such
+        # as All Staff. No Neologik guest may join that group.
+        Add-CompliantPreWindowState
+        $allStaff = Get-FakeGroup -Id $script:Ids.UserGroup
+        $allStaff.displayName = 'All Staff'
+        $allStaff.members = @(@{ id = $script:Ids.Me })
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); UserGroupId = $script:Ids.UserGroup }
+        $code | Should -Be 0
+        $allStaff.displayName | Should -Be 'All Staff'
+        @($allStaff.members) | Should -HaveCount 1
+        @($script:Writes | Where-Object { $_ -like 'PATCH group All Staff*' -or $_ -like 'POST group member All Staff *' }) | Should -HaveCount 0
+        $script:Writes | Should -Contain "POST group Neologik User Group - $script:ShortName"
+        (Get-SummaryResult 'Security groups') | Should -Be "Present: 3. Created: Neologik User Group - $script:ShortName. Not used, a name of the organisation's own: 'All Staff'"
+        $created = @($script:Tenant.Groups | Where-Object { $_.displayName -eq "Neologik User Group - $script:ShortName" })
+        $created | Should -HaveCount 1
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PreWindow_*.json')
+        $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        $json.userGroupId | Should -Be $created[0].id
+    }
+
+    It 'keeps the name of an Admin User Group that the command names by id when the name is not a Neologik name (project#3787)' {
+        Add-CompliantPreWindowState
+        (Get-FakeGroup -Id $script:Ids.AdminGroup).displayName = 'IT Administrators'
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); AdminGroupId = $script:Ids.AdminGroup }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        (Get-FakeGroup -Id $script:Ids.AdminGroup).displayName | Should -Be 'IT Administrators'
+        (Get-SummaryResult 'Security groups') | Should -Be "Present: 3. Kept the name: 'IT Administrators'"
+    }
+
+    It 'records the user group found by name in the summary file when the command gives no id (project#3787)' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PreWindow_*.json')
+        $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        $json.userGroupId | Should -Be $script:Ids.UserGroup
     }
 
     It 'reports the guest users file as skipped when the file is not beside the script' {
