@@ -75,6 +75,12 @@
         - 'Neologik NCE Admins - <short name>', the administrators of the
           Neologik Context Engine.
         - 'Neologik Admin User Group - <short name>'
+      The command can name three of the groups by id: -UserGroupId,
+      -NceUserGroupId and -AdminGroupId. The id decides, whatever the name. A
+      group whose name begins 'Neologik' gets the name in this list, and keeps
+      the id and the members. A group with a name of your own keeps the name.
+      A user group with a name of your own stays as it is, with no new member.
+      The script then finds or creates 'Neologik User Group - <short name>'.
       The script creates a group that is absent. The script then confirms that
       each Neologik support account in NeologikGuestUsers.txt is a guest of the
       tenant, and invites an account that is absent. Last, the script confirms
@@ -306,6 +312,15 @@
     federated credential of the deployment identity accepts only a deployment run
     that names this environment. Required. The command from Neologik gives the value.
 
+.PARAMETER UserGroupId
+    The object id of the security group 'Neologik User Group - <short name>',
+    whose members use the Neologik agents. The command from Neologik gives the
+    value for an environment that was set up before version 5. The script finds
+    the group by the id. A group whose name begins 'Neologik' gets that name.
+    A group with a name of your own stays as it is, with no new member, and
+    the script finds or creates the group by that name instead. Without the
+    parameter the script finds the group by that name.
+
 .PARAMETER NceUserGroupId
     The object id of the security group whose members sign in to the Neologik
     Context Engine. Without the parameter the script skips step 2 and step 3.
@@ -367,7 +382,7 @@
     Change the value only when Neologik gives you another value.
 
 .EXAMPLE
-    ./Migrate-NeologikEnvironment.ps1 -KitVersion v5.0.15 -TenantId <tenant id> -DeploySpClientId <deployment identity client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <sign-in application client id> -SharePointAppClientId <SharePoint application client id> -BotAppClientIds <client id>,<client id> -NceUserGroupId <group object id> -AdminGroupId <group object id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01
+    ./Migrate-NeologikEnvironment.ps1 -KitVersion v5.0.15 -TenantId <tenant id> -DeploySpClientId <deployment identity client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <sign-in application client id> -SharePointAppClientId <SharePoint application client id> -BotAppClientIds <client id>,<client id> -UserGroupId <group object id> -NceUserGroupId <group object id> -AdminGroupId <group object id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01
 
     The pre migration script, with the command that Neologik sends.
 
@@ -456,6 +471,9 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$EnvironmentName,
+
+    [Parameter(Mandatory = $false)]
+    [string]$UserGroupId,
 
     [Parameter(Mandatory = $false)]
     [string]$NceUserGroupId,
@@ -672,7 +690,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.5'
+$script:ScriptVersion = '1.1.6'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -1556,7 +1574,7 @@ function Resolve-NeologikInput {
     param([hashtable]$Parameters)
     $state = $script:State
     foreach ($name in @('KitVersion', 'ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SolutionShortName', 'SolutionName', 'SignInAppClientId', 'SharePointAppClientId',
-            'NceUserGroupId', 'AdminGroupId', 'GuestUsersFile', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'ScriptRunnerObjectId', 'DirectoryIdentityName', 'EnvironmentName')) {
+            'UserGroupId', 'NceUserGroupId', 'AdminGroupId', 'GuestUsersFile', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'ScriptRunnerObjectId', 'DirectoryIdentityName', 'EnvironmentName')) {
         $state[$name] = ([string](Get-NeologikProperty $Parameters $name '')).Trim()
     }
     # Agent registrations: one client id for each agent registration. One element can
@@ -1635,6 +1653,12 @@ function Resolve-NeologikInput {
                 }) | Select-Object -First 1
             if ($nceGroup) { $state.NceUserGroupId = [string](Get-NeologikProperty $nceGroup 'Id' '') }
         }
+        if (-not $state.UserGroupId) {
+            $userGroup = @(@(Get-NeologikProperty $config 'SecurityGroups' @()) | Where-Object {
+                    [string](Get-NeologikProperty $_ 'Name' '') -like 'Neologik User Group*'
+                }) | Select-Object -First 1
+            if ($userGroup) { $state.UserGroupId = [string](Get-NeologikProperty $userGroup 'Id' '') }
+        }
         if (-not $state.AdminGroupId) {
             $adminGroup = @(@(Get-NeologikProperty $config 'SecurityGroups' @()) | Where-Object {
                     [string](Get-NeologikProperty $_ 'Name' '') -like $script:AdminGroupNamePattern
@@ -1674,6 +1698,7 @@ function Resolve-NeologikInput {
         @{ Name = 'DeploySpClientId'; Value = $state.DeploySpClientId },
         @{ Name = 'SignInAppClientId'; Value = $state.SignInAppClientId },
         @{ Name = 'SharePointAppClientId'; Value = $state.SharePointAppClientId },
+        @{ Name = 'UserGroupId'; Value = $state.UserGroupId },
         @{ Name = 'NceUserGroupId'; Value = $state.NceUserGroupId },
         @{ Name = 'AdminGroupId'; Value = $state.AdminGroupId },
         @{ Name = 'SubscriptionId'; Value = $state.SubscriptionId },
@@ -1682,6 +1707,13 @@ function Resolve-NeologikInput {
     foreach ($idCheck in $idChecks) {
         if ($idCheck.Value -and -not (Test-NeologikGuid $idCheck.Value)) {
             throw [System.ArgumentException]::new("$($idCheck.Name) must be a GUID. The value is '$($idCheck.Value)'.")
+        }
+    }
+    # The user group is a group of its own. One id under two parameters would rename
+    # the same group back and forth on every run.
+    foreach ($other in @(@{ Name = 'NceUserGroupId'; Value = $state.NceUserGroupId }, @{ Name = 'AdminGroupId'; Value = $state.AdminGroupId })) {
+        if ($state.UserGroupId -and $other.Value -and $state.UserGroupId -eq $other.Value) {
+            throw [System.ArgumentException]::new("UserGroupId and $($other.Name) name the same group, $($state.UserGroupId). The user group is a separate group. Ask Neologik for the current command.")
         }
     }
     if (($state.Run -eq 'PreWindow' -or $state.LaterRun) -and (-not $state.SubscriptionId -or -not $state.ResourceGroupName)) {
@@ -1732,6 +1764,7 @@ function Write-NeologikHeader {
     if ($state.SignInAppClientId) { $lines += "  Platform Sign-in application:               $($state.SignInAppClientId)" }
     if ($state.SharePointAppClientId) { $lines += "  SharePoint application:                     $($state.SharePointAppClientId)" }
     if ($state.BotAppClientIds.Count -gt 0) { $lines += "  Agent registrations:                        $($state.BotAppClientIds -join ', ')" }
+    if ($state.UserGroupId) { $lines += "  Neologik User Group:                        $($state.UserGroupId)" }
     if ($state.NceUserGroupId) { $lines += "  User group of the Neologik Context Engine:  $($state.NceUserGroupId)" }
     if ($state.AdminGroupId) { $lines += "  Admin User Group:                           $($state.AdminGroupId)" }
     if ($state.ScriptRunnerObjectId) { $lines += "  Script runner identity:                     $($state.ScriptRunnerObjectId)" }
@@ -2517,7 +2550,7 @@ function Set-NeologikSecurityGroup {
     $suffix = " - $($state.ShortName)"
     $definitions = @(
         @{ Key = 'UserGroup'; Name = "Neologik User Group$suffix"
-           Description = 'Default Neologik users group - assign to agent channels created in the NCE'; PreviousNames = @(); GivenId = '' },
+           Description = 'Default Neologik users group - assign to agent channels created in the NCE'; PreviousNames = @(); GivenId = $state.UserGroupId },
         @{ Key = 'Contributors'; Name = "Neologik NCE Contributors$suffix"
            Description = 'NCE contributor role - create and change platform configuration in the Neologik Context Engine'
            PreviousNames = @("Neologik NCE User Group$suffix", "Neologik Harness User Group$suffix"); GivenId = $state.NceUserGroupId },
@@ -2532,6 +2565,8 @@ function Set-NeologikSecurityGroup {
     $present = @()
     $created = @()
     $renamed = @()
+    $kept = @()
+    $notUsed = @()
     $pendingCreate = @()
     $failed = @()
     foreach ($definition in $definitions) {
@@ -2540,6 +2575,16 @@ function Set-NeologikSecurityGroup {
             if ($definition.GivenId) {
                 # The command names the group by id. The id decides, whatever the name.
                 $group = Invoke-NeologikGraph -Method GET -Uri "$graph/groups/$($definition.GivenId)?`$select=id,displayName"
+                $givenName = [string](Get-NeologikProperty $group 'displayName' '')
+                if ($group -and $definition.Key -eq 'UserGroup' -and -not $givenName.StartsWith('Neologik ', [System.StringComparison]::OrdinalIgnoreCase)) {
+                    # Every Neologik guest joins the user group. A group with a name of the
+                    # organisation's own stays as it is, with no new member, so the script
+                    # finds or creates the user group by name instead.
+                    Write-Log "  '$givenName': the group that -UserGroupId names has a name of the organisation's own. The script leaves the group as it is and uses '$($definition.Name)'" -Level Info
+                    $notUsed += "'$givenName'"
+                    $state.UserGroupId = ''
+                    $group = $null
+                }
             }
             if (-not $group) { $group = Get-NeologikGroupByName -DisplayName $definition.Name }
             if (-not $group) {
@@ -2558,6 +2603,15 @@ function Set-NeologikSecurityGroup {
         if ($group) {
             $groupId = [string](Get-NeologikProperty $group 'id' '')
             $currentName = [string](Get-NeologikProperty $group 'displayName' '')
+            if ($currentName -ne $definition.Name -and -not $currentName.StartsWith('Neologik ', [System.StringComparison]::OrdinalIgnoreCase)) {
+                # Only an id in the command finds a group under another name. A name that
+                # is not a Neologik name belongs to the organisation, and the group may
+                # serve other work, so the script keeps the name.
+                Write-Log "  '$currentName': the group that the command names by id keeps the name. The name is not a Neologik name" -Level Info
+                $kept += "'$currentName'"
+                $groups[$definition.Key] = @{ Id = $groupId; Name = $currentName }
+                continue
+            }
             if ($currentName -ne $definition.Name) {
                 # The group keeps the id and the members. The display name changes to the
                 # name in the definition.
@@ -2617,12 +2671,15 @@ function Set-NeologikSecurityGroup {
     if ($present.Count -gt 0) { $parts += "Present: $($present.Count)" }
     if ($created.Count -gt 0) { $parts += "Created: $($created -join ', ')" }
     if ($renamed.Count -gt 0) { $parts += "Renamed: $($renamed -join ', ')" }
+    if ($kept.Count -gt 0) { $parts += "Kept the name: $($kept -join ', ')" }
+    if ($notUsed.Count -gt 0) { $parts += "Not used, a name of the organisation's own: $($notUsed -join ', ')" }
     if ($pendingCreate.Count -gt 0) { $parts += "WOULD CREATE: $($pendingCreate -join ', ')" }
     if ($failed.Count -gt 0) { $parts += "FAILED: $($failed -join '; ')" }
     Add-Summary 'Security groups' ($parts -join '. ')
 
     # The two role groups of the Neologik Context Engine, for step 3 and for the
-    # summary file. The Admin User Group, for the permission reduction.
+    # summary file. The Admin User Group, for the permission reduction. The user
+    # group, for the snapshot and the summary file.
     if ($groups.ContainsKey('Contributors')) {
         $state.NceContributorsGroupId = $groups['Contributors'].Id
         if (-not $state.NceUserGroupId) { $state.NceUserGroupId = $groups['Contributors'].Id }
@@ -2638,6 +2695,7 @@ function Set-NeologikSecurityGroup {
         Add-Summary 'NCE Admins group' 'MISSING: the group could not be read or created. Read the item Security groups'
     }
     if ($groups.ContainsKey('AdminUserGroup') -and -not $state.AdminGroupId) { $state.AdminGroupId = $groups['AdminUserGroup'].Id }
+    if ($groups.ContainsKey('UserGroup') -and -not $state.UserGroupId) { $state.UserGroupId = $groups['UserGroup'].Id }
 
     # ----- the Neologik guest users ---------------------------------------------
     $guestIds = @()
@@ -4486,7 +4544,7 @@ function Write-NeologikSnapshot {
                 Get-NeologikSnapshotSection { @(Get-AzRoleAssignment -ObjectId $deploySp.Id -ErrorAction Stop | ForEach-Object { [ordered]@{ role = [string]$_.RoleDefinitionName; scope = [string]$_.Scope } }) }
             } else { @{ error = 'not read: the run did not sign in to Azure' } }
         }
-        $groupIds = @(@($state.NceUserGroupId, $state.NceContributorsGroupId, $state.NceAdminsGroupId, $state.AdminGroupId) | Where-Object { $_ } | Select-Object -Unique)
+        $groupIds = @(@($state.UserGroupId, $state.NceUserGroupId, $state.NceContributorsGroupId, $state.NceAdminsGroupId, $state.AdminGroupId) | Where-Object { $_ } | Select-Object -Unique)
         $groups = @()
         foreach ($groupId in $groupIds) { $groups += (Get-NeologikSnapshotSection { Get-NeologikSnapshotGroup -GroupId $groupId }) }
         $azure = if ($state.ContainsKey('AzureConnected') -and $state.AzureConnected) {
@@ -5075,8 +5133,9 @@ function Write-NeologikSummary {
             exitReason           = [string]$script:ExitReason
             deploymentGraphRoles = @($heldRoles)
             expectedGraphRoles   = @($script:RequiredGraphRoles)
-            # The two role groups of the Neologik Context Engine (pre migration script). Neologik
-            # records the NCE Admins group for the environment.
+            # The user group and the two role groups of the Neologik Context Engine (pre migration
+            # script). Neologik records the NCE Admins group for the environment.
+            userGroupId          = [string](Get-NeologikProperty $state 'UserGroupId' '')
             nceContributorsGroupId = [string](Get-NeologikProperty $state 'NceContributorsGroupId' '')
             nceAdminsGroupId     = [string](Get-NeologikProperty $state 'NceAdminsGroupId' '')
             items                = @($script:Summary)
@@ -5143,6 +5202,7 @@ function Invoke-NeologikEnvironmentMigration {
         [string[]]$BotAppClientIds,
         [string]$DirectoryIdentityName,
         [string]$EnvironmentName,
+        [string]$UserGroupId,
         [string]$NceUserGroupId,
         [string]$AdminGroupId,
         [string]$GuestUsersFile,
@@ -5185,6 +5245,7 @@ function Invoke-NeologikEnvironmentMigration {
             BotAppClientIds         = @($BotAppClientIds)
             DirectoryIdentityName   = $DirectoryIdentityName
             EnvironmentName         = $EnvironmentName
+            UserGroupId             = $UserGroupId
             NceUserGroupId          = $NceUserGroupId
             AdminGroupId            = $AdminGroupId
             GuestUsersFile          = $GuestUsersFile
