@@ -92,7 +92,7 @@ Before the migration script changes anything in the directory, the signed-in acc
 
 | Input | Content |
 |---|---|
-| Command-line parameters | The version of the onboarding kit that the migration brings the environment to (`-KitVersion`, required). The tenant, the deployment identity, the solution name and the short name, the Platform Sign-in application, the SharePoint application, each agent registration, the two groups, the subscription and the resource group. The switches `-LaterRun`, `-Verify` and `-UseAzureCliToken`. The storage account for the upload |
+| Command-line parameters | The version of the onboarding kit that the migration brings the environment to (`-KitVersion`, required). The tenant, the deployment identity, the solution name and the short name, the Platform Sign-in application, the SharePoint application, each agent registration, the three groups, the subscription and the resource group. The switches `-LaterRun`, `-Verify` and `-UseAzureCliToken`. The storage account for the upload |
 | `-ConfigurationFile` | The configuration file that the onboarding wrote. The command from Neologik gives each value as a parameter, so the command needs no configuration file |
 | `NeologikGuestUsers.txt` | The Neologik support accounts that the pre migration script confirms as guests of the tenant. The file is beside the script, or `-GuestUsersFile` names the file |
 
@@ -129,7 +129,7 @@ Each write happens only when the read before the write shows the object or the v
 | Grant application permission | Pre and post migration scripts | `Application.ReadWrite.OwnedBy` to the directory managed identity |
 | Add owner | Pre and post migration scripts | The directory managed identity, on each agent registration that the command names and on the service principal of each |
 | Create group | Pre migration script | Each of the four security groups that is absent |
-| Rename group | Pre migration script | `Neologik NCE User Group - <short name>` to `Neologik NCE Contributors - <short name>`. The group keeps its id and its members |
+| Rename group | Pre migration script | `Neologik NCE User Group - <short name>` to `Neologik NCE Contributors - <short name>`. A group that the command names by id, `-UserGroupId`, `-NceUserGroupId` or `-AdminGroupId`, from another name that begins `Neologik` to the name of step 2. The group keeps its id and its members. A group with a name of the organisation's own keeps the name. A user group with a name of the organisation's own is not used, and step 2 finds or creates the user group by name |
 | Invite guest | Pre migration script | Each Neologik support account in `NeologikGuestUsers.txt` that is not a guest of the tenant |
 | Add member | Pre migration script | Each guest and the signed-in administrator to each of the four groups |
 | Assign group to application | Pre migration script | The user group and the NCE Admins group to the Platform Sign-in application |
@@ -161,7 +161,7 @@ The migration script changes no Azure resource other than the directory managed 
 | File | Content | Secret |
 |---|---|---|
 | `NeologikEnvironmentMigration_<date and time>.log` | Every message of the run, each failed Microsoft Graph request with its status and request id, the summary table | None |
-| `Neologik_EnvironmentMigration_<PreWindow or PostWindow>_<date and time>.json` | The versions, the tenant, the deployment identity, the signed-in account, the permissions the deployment identity holds, the two role groups, every item of the summary | None |
+| `Neologik_EnvironmentMigration_<PreWindow or PostWindow>_<date and time>.json` | The versions, the tenant, the deployment identity, the signed-in account, the permissions the deployment identity holds, the user group and the two role groups, every item of the summary | None |
 | `Neologik_EnvironmentMigration_Snapshot_<Pre or Post>_<date and time>.json` | The state of the application registrations, the security groups, the deployment identity and the resource group tags as the run leaves them | None. Credential kinds and expiry dates only, never a value |
 
 The migration script writes the files to its own folder, else to the current folder, else to the temporary folder. The migration script uploads the files to the storage account of the onboarding, `stneodeploy...`, else to the storage account that `-UploadStorageAccountName` names, with the Azure session of the administrator. A storage account behind a private endpoint cannot be reached, and the files stay on the workstation.

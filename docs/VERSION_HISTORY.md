@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.6](#version-116)
 2. [Version 1.1.5](#version-115)
 2. [Version 1.1.4](#version-114)
 3. [Version 1.1.3](#version-113)
@@ -29,7 +30,20 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.5 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.6 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.6
+
+**Date**: 2026-11-03
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| `Migrate-NeologikEnvironment.ps1` | The command can name the user group by id, with `-UserGroupId`. The pre migration script then finds the user group under an earlier name, gives the group the current name and creates no second user group. The command from Neologik gives the value |
+| `Migrate-NeologikEnvironment.ps1` | A group that the command names by id keeps the name when the name does not begin `Neologik`. A user group with such a name stays as it is and gains no member: the pre migration script finds or creates `Neologik User Group - <short name>` instead |
+| `Migrate-NeologikEnvironment.ps1` | The summary file and the snapshot file record the user group |
+| `MIGRATION-SCRIPT-GUIDE.md` and `MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` | Both documents describe the groups that the command names by id |
 
 ## Version 1.1.5
 
