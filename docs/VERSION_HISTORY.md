@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.7](#version-117)
 2. [Version 1.1.6](#version-116)
 2. [Version 1.1.5](#version-115)
 2. [Version 1.1.4](#version-114)
@@ -30,7 +31,17 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.6 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.7 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.7
+
+**Date**: 2026-11-03
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1. The migration script is unchanged apart from its version number.
+
+| Item | Change |
+|---|---|
+| `README.md` | The migration of a Standard environment moves the entry point to a new static public IP address. The document names the two steps before the window, the person who manages your DNS and the lowered time to live, and the DNS change at the end of the window |
 
 ## Version 1.1.6
 
