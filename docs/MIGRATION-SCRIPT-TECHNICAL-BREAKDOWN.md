@@ -8,7 +8,7 @@ This document lists each sign-in, each permission, each write to the directory, 
 
 ### What the migration script does
 
-The migration script moves one existing Neologik Platform environment to version 5 of the Neologik Platform. A Global Administrator who also holds Owner or User Access Administrator on the subscription runs the migration script twice.
+The migration script moves one existing Neologik Platform environment to version 5 of the Neologik Platform. A Global Administrator who also holds Owner on the subscription runs the migration script twice.
 
 | Run | Writes |
 |---|---|
@@ -110,6 +110,7 @@ The migration script checks each input before the first sign-in: each id is a GU
 | 5 | Pre migration script | The sign-in to Azure. The ten Azure roles of the deployment identity. The tag `NeologikOnboardingKit` on the resource group |
 | 5a | Pre migration script | The Azure quotas that the migration needs, in the region of the environment: App Service Y1 instances, the vCPUs of the node pool family and of the region against the growth of the cluster, and the regional Azure OpenAI quota of each model that the Foundry account lacks. Read only |
 | 6 | Post migration script | The two Microsoft Graph application permissions, then the removal of seven other Microsoft Graph application permissions. The sign-in to Azure. The ten Azure roles. The removal of Contributor and User Access Administrator on the subscription. The removal of the directory role Application Administrator and of the membership of the Admin User Group. The removal of every other Azure role, directory role and group membership. The removal of every role assignment on the resource group whose identity is gone from Microsoft Entra ID. When the command names the script runner identity with `-ScriptRunnerObjectId`, Reader on the resource group for that identity. Then the removal of Contributor on the subscription and on the resource group from that identity. The tag `NeologikOnboardingKit` |
+| 4c and 5b | Pre and post migration scripts | The federated credential of the deployment identity. The directory managed identity, the Microsoft Graph application permission of the managed identity and the owners. The tag `NeologikOnboardingKit` waits for both |
 | Close | Pre and post migration scripts | The snapshot file, the summary table and the summary file, the upload, the list of files |
 
 ## Directory writes
@@ -124,6 +125,9 @@ Each write happens only when the read before the write shows the object or the v
 | Add sponsor | Pre migration script | The signed-in administrator, on an agent identity blueprint with no sponsor |
 | Grant application permission | Pre and post migration scripts | `AgentIdUser.ReadWrite.IdentityParentedBy` to the service principal of the agent identity blueprint. `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` to the deployment identity. `Sites.Selected` to the SharePoint application, when another SharePoint application of Neologik holds a SharePoint permission |
 | Add federated credential | Pre migration script | `github-oidc-neo-infrastructure`, `github-oidc-neo-bot-service` and `github-oidc-neo-env-config` on the agent identity blueprint |
+| Add federated credential | Pre and post migration scripts | `github-deployments-<environment name>` on the application registration of the deployment identity. The credential accepts only a run of the Neologik deployment organisation that names this environment. The credential adds no permission |
+| Grant application permission | Pre and post migration scripts | `Application.ReadWrite.OwnedBy` to the directory managed identity |
+| Add owner | Pre and post migration scripts | The directory managed identity, on each agent registration that the command names and on the service principal of each |
 | Create group | Pre migration script | Each of the four security groups that is absent |
 | Rename group | Pre migration script | `Neologik NCE User Group - <short name>` to `Neologik NCE Contributors - <short name>`. The group keeps its id and its members |
 | Invite guest | Pre migration script | Each Neologik support account in `NeologikGuestUsers.txt` that is not a guest of the tenant |
@@ -146,10 +150,11 @@ The migration script removes no member other than the deployment identity. The m
 | Role assignment | Post migration script | Reader on the resource group to the script runner identity, the managed identity `neologik-script-runner-service-connection-<short name>` that the deployment runs its scripts with, when the command names the identity with `-ScriptRunnerObjectId` and the identity lacks the role |
 | Role assignment removal | Post migration script | Contributor on the subscription and Contributor on the resource group from the script runner identity, only after the identity holds Reader on the resource group. The identity keeps Key Vault Secrets Officer and Azure Bot Service Contributor Role on the resource group. Without `-ScriptRunnerObjectId` the migration script changes no role of the identity |
 | Role assignment removal | Post migration script | Every role assignment made on the resource group itself whose identity is gone from Microsoft Entra ID, whatever the role. Such a role assignment grants nothing, and the Azure portal shows the role assignment as "Identity not found". Azure reports such an identity as Unknown. The migration script then reads the object from Microsoft Entra ID. The assignment is removed only when that read answers that the object is gone. An assignment inherited from the subscription is never read or touched |
-| Tag | Pre and post migration scripts | `NeologikOnboardingKit` on the resource group, set to the value of `-KitVersion`, merged with the other tags |
+| Create managed identity | Pre and post migration scripts | The directory managed identity, with the name that `-DirectoryIdentityName` gives, in the location of the resource group and with the tags of the resource group. The managed identity holds no Azure role. Nothing can sign in as the managed identity until a deployment by Neologik adds the sign-in credential |
+| Tag | Pre and post migration scripts | `NeologikOnboardingKit` on the resource group, set to the value of `-KitVersion`, merged with the other tags, when the federated credential and the directory managed identity are complete |
 | Role assignment | Pre and post migration scripts | Storage Blob Data Contributor on one storage account to the signed-in administrator, only when the storage account refuses the upload of the files of the run |
 
-The migration script changes no Azure resource other than the tag and the role assignments. The quota step reads the quotas of the subscription (App Service, compute, Azure OpenAI), the node pools of the cluster, the virtual machine sizes of the region and the model deployments of the AI accounts in the resource group, and changes none of them. The migration script reads the Microsoft Entra administrator of each SQL server in the resource group and changes nothing on the server.
+The migration script changes no Azure resource other than the directory managed identity, the tag and the role assignments. The quota step reads the quotas of the subscription (App Service, compute, Azure OpenAI), the node pools of the cluster, the virtual machine sizes of the region and the model deployments of the AI accounts in the resource group, and changes none of them. The migration script reads the Microsoft Entra administrator of each SQL server in the resource group and changes nothing on the server.
 
 ## Files
 
