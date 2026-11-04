@@ -192,9 +192,10 @@
           membership only when each SQL server in the resource group names the
           deployment identity as the Microsoft Entra administrator.
         - Every other Azure role in the subscription. The script keeps two roles
-          below the resource group: Cognitive Services Content Understanding
-          Contributor on a resource in the resource group, and Storage Blob Data
-          Contributor on the container function-package.
+          below the resource group. The first is Cognitive Services Content
+          Understanding Contributor on a resource in the resource group. The
+          second is Storage Blob Data Contributor on the container
+          function-package.
         - Every other directory role and every other group membership.
         - Contributor on the subscription and on the resource group from the
           script runner identity, the managed identity that the deployment runs
@@ -626,11 +627,10 @@ $script:AdminGroupNamePattern = 'Neologik Admin User Group*'
 # The declared set. The deployment identity holds the roles above and two further
 # roles, each at a scope below the resource group. The deployment by Neologik grants
 # the first role on the Content Understanding account. The deployment grants the second
-# role on the container function-package, in the storage account of the function that
-# starts and stops the cluster. The deployment uploads the package of that function to
-# the container. The post migration script removes every other Azure role that the
-# deployment identity holds in the subscription. The post migration script also removes
-# every directory role and every group membership.
+# role on the container function-package. That container holds the package of the
+# function that starts and stops the cluster. The post migration script removes every
+# other Azure role that the deployment identity holds in the subscription. The post
+# migration script also removes every directory role and every group membership.
 $script:DeclaredResourceRoles = @('Cognitive Services Content Understanding Contributor')
 $script:DeclaredContainerRole = 'Storage Blob Data Contributor'
 $script:DeclaredContainerName = 'function-package'

@@ -43,7 +43,7 @@ This version applies to an environment on Neologik Platform version 5.0 or versi
 
 | Item | Change |
 |---|---|
-| The post migration script | Keeps the role Storage Blob Data Contributor of the deployment identity on the container `function-package`. The deployment grants the role, and uploads to that container the package of the function that starts and stops the cluster. Before this version, the post migration script removed the role, and the next deployment granted the role again. A run with `-Verify` reported the role as a removal to make |
+| The post migration script | Keeps the role Storage Blob Data Contributor of the deployment identity on the container `function-package`. The deployment grants the role. The deployment uploads to that container the package of the function that starts and stops the cluster. Before this version, the post migration script removed the role, and the next deployment granted the role again. A run with `-Verify` reported the role as a removal to make |
 
 ## Version 1.1.8
 

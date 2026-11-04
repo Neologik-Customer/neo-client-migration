@@ -21,7 +21,7 @@ The migration script moves one existing Neologik Platform environment to version
 |---|---|
 | Resource group | Seven roles: Contributor, Key Vault Certificates Officer, Key Vault Secrets Officer, Storage Blob Data Contributor, Azure Kubernetes Service RBAC Cluster Admin, Monitoring Contributor and Role Based Access Control Administrator |
 | Subscription | Three roles: Reader, Cost Management Contributor, and Role Based Access Control Administrator limited by a condition to assigning three roles, Reader, AppGw for Containers Configuration Manager and Cost Management Reader. These roles change no Azure resource other than cost configuration, support requests and assignments of the three assignable roles |
-| Resources in the resource group | Two roles, each granted by the deployment: Cognitive Services Content Understanding Contributor on the Content Understanding account, and Storage Blob Data Contributor on the container `function-package`, which holds the package of the function that starts and stops the cluster |
+| Resources in the resource group | Two roles, each granted by the deployment. Cognitive Services Content Understanding Contributor on the Content Understanding account. Storage Blob Data Contributor on the container `function-package`. That container holds the package of the function that starts and stops the cluster |
 | Microsoft Graph | Two application permissions: `Application.ReadWrite.OwnedBy` and `AgentIdentityBlueprint.AddRemoveCreds.All` |
 | Microsoft Entra ID | No directory role and no group membership |
 
