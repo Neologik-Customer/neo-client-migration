@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.9](#version-119)
 2. [Version 1.1.8](#version-118)
 2. [Version 1.1.7](#version-117)
 2. [Version 1.1.6](#version-116)
@@ -32,7 +33,17 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.8 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.9 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.9
+
+**Date**: 2026-11-04
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| The post migration script | Keeps the role Storage Blob Data Contributor of the deployment identity on the container `function-package`. The deployment grants the role. The deployment uploads to that container the package of the function that starts and stops the cluster. Before this version, the post migration script removed the role, and the next deployment granted the role again. A run with `-Verify` reported the role as a removal to make |
 
 ## Version 1.1.8
 

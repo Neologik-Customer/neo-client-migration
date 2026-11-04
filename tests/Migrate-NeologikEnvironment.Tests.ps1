@@ -342,9 +342,10 @@ BeforeAll {
         # what the audit found beyond the declared set - the
         # evals self-grants at resource-group scope, a subscription-scope
         # leftover, an undeclared resource-scoped role, the declared
-        # resource-scoped Content Understanding role (kept), a directory role
-        # other than Application Administrator, and a group other than the
-        # Admin User Group.
+        # resource-scoped Content Understanding role (kept), the declared
+        # role on the container function-package (kept), the same role on
+        # another container, a directory role other than Application
+        # Administrator, and a group other than the Admin User Group.
         $t = $script:Tenant
         foreach ($roleName in @('Azure AI Developer', 'Foundry User', 'Reader', 'Search Index Data Reader')) {
             $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = $roleName; Scope = $script:RgScope }
@@ -352,6 +353,8 @@ BeforeAll {
         $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = 'Key Vault Secrets Officer'; Scope = $script:SubScope }
         $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = 'Search Index Data Reader'; Scope = "$script:RgScope/providers/Microsoft.Search/searchServices/srch-$script:ShortName" }
         $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = 'Cognitive Services Content Understanding Contributor'; Scope = "$script:RgScope/providers/Microsoft.CognitiveServices/accounts/ais-cu-$script:ShortName" }
+        $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = "$script:RgScope/providers/Microsoft.Storage/storageAccounts/stfn$script:ShortName/blobServices/default/containers/function-package" }
+        $t.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = "$script:RgScope/providers/Microsoft.Storage/storageAccounts/stfn$script:ShortName/blobServices/default/containers/uploads" }
         $t.DirectoryRoles += @{ Id = $script:Ids.AgentIdAdminRole; RoleTemplateId = 'db506228-d27e-4b7d-95e5-295956d6615f'; DisplayName = 'Agent ID Administrator'; members = @($script:Ids.DeploySpId) }
         $t.Groups += @{ id = $script:Ids.DevTeamGroup; displayName = 'Neologik Dev Team'; members = @(@{ id = $script:Ids.DeploySpId }, @{ id = $script:Ids.Me }); appRoleAssignments = @() }
     }
@@ -3306,12 +3309,16 @@ Context 'The post migration script: declared set or nothing' {
         foreach ($item in @('Other Azure role: Azure AI Developer on resource group', 'Other Azure role: Foundry User on resource group',
                 'Other Azure role: Reader on resource group', 'Other Azure role: Search Index Data Reader on resource group',
                 'Other Azure role: Key Vault Secrets Officer on subscription', "Other Azure role: Search Index Data Reader on srch-$script:ShortName",
+                'Other Azure role: Storage Blob Data Contributor on uploads',
                 'Other directory role: Agent ID Administrator', 'Other group membership: Neologik Dev Team')) {
             Get-SummaryResult $item | Should -Be 'Removed' -Because "$item must go"
         }
         Get-SummaryResult 'Other Azure role: Cognitive Services Content Understanding Contributor on ais-cu-abcprd01' | Should -BeNullOrEmpty -Because 'the Content Understanding role is declared at resource scope'
+        Get-SummaryResult 'Other Azure role: Storage Blob Data Contributor on function-package' | Should -BeNullOrEmpty -Because 'the role on the container function-package is declared'
         $left = @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.DeploySpId })
         @($left | Where-Object { $_.RoleDefinitionName -eq 'Cognitive Services Content Understanding Contributor' }) | Should -HaveCount 1
+        @($left | Where-Object { $_.Scope -like '*/containers/function-package' }).RoleDefinitionName | Should -Be 'Storage Blob Data Contributor'
+        @($left | Where-Object { $_.Scope -like '*/containers/uploads' }) | Should -HaveCount 0
         @($left | Where-Object { $_.RoleDefinitionName -in @('Azure AI Developer', 'Foundry User') }) | Should -HaveCount 0
         @($left | Where-Object { $_.Scope -eq $script:SubScope }).RoleDefinitionName | Sort-Object | Should -Be @('Cost Management Contributor', 'Reader', 'Role Based Access Control Administrator')
         @($left | Where-Object { $_.Scope -eq $script:RgScope }).RoleDefinitionName | Sort-Object | Should -Be @($script:RequiredRgRoles | Sort-Object)
@@ -3325,8 +3332,17 @@ Context 'The post migration script: declared set or nothing' {
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 1
         Get-SummaryResult 'Other Azure role: Foundry User on resource group' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Other Azure role: Storage Blob Data Contributor on function-package' | Should -BeNullOrEmpty -Because 'the role on the container function-package is declared'
         Get-SummaryResult 'Other directory role: Agent ID Administrator' | Should -Be 'WOULD REMOVE'
         Get-SummaryResult 'Other group membership: Neologik Dev Team' | Should -Be 'WOULD REMOVE'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'keeps the role that the infrastructure deployment grants on the container function-package' {
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $script:Ids.DeploySpId; RoleDefinitionName = 'Storage Blob Data Contributor'; Scope = "$script:RgScope/providers/Microsoft.Storage/storageAccounts/stfn$script:ShortName/blobServices/default/containers/function-package" }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 0
+        Get-SummaryResult 'Other Azure roles' | Should -Be 'None'
         $script:Writes | Should -HaveCount 0
     }
 
