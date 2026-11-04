@@ -191,9 +191,11 @@
         - The membership of the Admin User Group. The script removes the
           membership only when each SQL server in the resource group names the
           deployment identity as the Microsoft Entra administrator.
-        - Every other Azure role in the subscription. The script keeps the role
-          Cognitive Services Content Understanding Contributor on a resource in
-          the resource group.
+        - Every other Azure role in the subscription. The script keeps two roles
+          below the resource group. The first is Cognitive Services Content
+          Understanding Contributor on a resource in the resource group. The
+          second is Storage Blob Data Contributor on the container
+          function-package.
         - Every other directory role and every other group membership.
         - Contributor on the subscription and on the resource group from the
           script runner identity, the managed identity that the deployment runs
@@ -622,12 +624,16 @@ $script:ScriptRunnerLegacyRole = 'Contributor'
 # The script finds the group by name in the SecurityGroups of the configuration file.
 $script:AdminGroupNamePattern = 'Neologik Admin User Group*'
 
-# The declared set. The deployment identity holds the roles above and one further
-# role. The deployment by Neologik grants the further role on the Content
-# Understanding account, at a scope below the resource group. The post migration script removes
-# every other Azure role that the deployment identity holds in the subscription. The
-# post migration script also removes every directory role and every group membership.
+# The declared set. The deployment identity holds the roles above and two further
+# roles, each at a scope below the resource group. The deployment by Neologik grants
+# the first role on the Content Understanding account. The deployment grants the second
+# role on the container function-package. That container holds the package of the
+# function that starts and stops the cluster. The post migration script removes every
+# other Azure role that the deployment identity holds in the subscription. The post
+# migration script also removes every directory role and every group membership.
 $script:DeclaredResourceRoles = @('Cognitive Services Content Understanding Contributor')
+$script:DeclaredContainerRole = 'Storage Blob Data Contributor'
+$script:DeclaredContainerName = 'function-package'
 
 $script:GraphSpAppId = '00000003-0000-0000-c000-000000000000'
 # The start of the name of the SharePoint application. The SharePoint application
@@ -690,7 +696,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.8'
+$script:ScriptVersion = '1.1.9'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -3897,7 +3903,11 @@ function Test-NeologikDeclaredAzureRole {
     if ($Scope -eq $RgScope) { return [bool]($script:RequiredRgRoles -contains $RoleName) }
     if ($Scope -eq $SubScope) { return [bool](($script:RequiredSubRoles + $script:LimitedSubRole) -contains $RoleName) }
     if ($Scope.StartsWith("$RgScope/", [System.StringComparison]::OrdinalIgnoreCase)) {
-        return [bool]($script:DeclaredResourceRoles -contains $RoleName)
+        if ($script:DeclaredResourceRoles -contains $RoleName) { return $true }
+        # The container role counts only on a container of that name, in a storage
+        # account of the resource group.
+        $containerScope = '^{0}/providers/Microsoft\.Storage/storageAccounts/[^/]+/blobServices/default/containers/{1}$' -f [regex]::Escape($RgScope), [regex]::Escape($script:DeclaredContainerName)
+        return [bool]($RoleName -eq $script:DeclaredContainerRole -and $Scope -match $containerScope)
     }
     return $false
 }
@@ -3983,7 +3993,7 @@ function Remove-NeologikUndeclaredAzureRole {
     # Step 6e: the function removes every Azure role assignment of the deployment
     # identity in the subscription that is outside the declared set. The declared set is
     # the seven roles on the resource group, the three roles on the subscription and
-    # the declared role below the resource group.
+    # the two declared roles below the resource group.
     $state = $script:State
     $deploySp = $state.DeploySp
     $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
