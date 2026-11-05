@@ -1,0 +1,66 @@
+# Azure resource providers and preview features the Neologik Platform requires.
+#
+# Install-NeologikEnvironment.ps1 registers every entry during onboarding, and
+# Register-NeologikResourceProviders.ps1 confirms the same list afterwards.
+#
+# One entry per line. Blank lines are ignored; anything from # to the end of a line is a comment.
+#   Provider:         Microsoft.Storage
+#   Preview feature:  Microsoft.Compute/EncryptionAtHost   (the provider must also be listed)
+#
+# The onboarding script registers the five providers it creates resources with (Resources,
+# KeyVault, Storage, ManagedIdentity, Compute) after the check of the roles, and confirms each
+# before its resource is created. The onboarding script registers every other entry after the
+# managed identities, at the end of the run, and confirms every entry before the configuration
+# is exported.
+# Register-NeologikResourceProviders.ps1 submits every entry in file order and waits for the
+# whole list together.
+
+# The onboarding script's own resources
+Microsoft.Resources
+Microsoft.KeyVault
+Microsoft.Storage
+Microsoft.ManagedIdentity
+Microsoft.Compute
+
+# Containers and network
+Microsoft.ContainerService
+Microsoft.ContainerRegistry
+Microsoft.ContainerInstance
+Microsoft.KubernetesConfiguration
+Microsoft.Network
+Microsoft.ServiceNetworking      # Application Gateway for Containers (Private Endpoint deployments)
+Microsoft.NetworkFunction        # Application Gateway for Containers (Private Endpoint deployments)
+
+# Virtual machine schedules (Private Endpoint deployments)
+Microsoft.DevTestLab
+
+# Data, search and AI
+Microsoft.Sql
+Microsoft.DocumentDB
+Microsoft.Search
+Microsoft.CognitiveServices
+Microsoft.MachineLearningServices
+Microsoft.VideoIndexer
+Microsoft.Fabric
+
+# Monitoring, alerting and support
+Microsoft.OperationalInsights
+Microsoft.Insights
+Microsoft.Monitor
+Microsoft.AlertsManagement
+Microsoft.Diagnostics
+Microsoft.ResourceHealth
+Microsoft.Help
+Microsoft.ChangeSafety
+
+# Application platform and integration
+Microsoft.App
+Microsoft.Web
+Microsoft.BotService
+Microsoft.ServiceLinker
+Microsoft.SaaS
+Microsoft.Quota
+
+# Preview features
+Microsoft.Compute/EncryptionAtHost
+Microsoft.ContainerService/AzureLinuxCVMPreview

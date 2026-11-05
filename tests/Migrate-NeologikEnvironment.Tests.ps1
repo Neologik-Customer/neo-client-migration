@@ -108,8 +108,14 @@ BeforeAll {
         DeployAppObj     = '33333333-cccc-3333-3333-333333333333'
         DirectorySpId    = 'dddddddd-3333-dddd-dddd-dddddddddddd'
         DirectoryAppId   = 'dddddddd-4444-dddd-dddd-dddddddddddd'
+        SqlSpId          = 'dddddddd-5555-dddd-dddd-dddddddddddd'
+        SqlAppId         = 'dddddddd-6666-dddd-dddd-dddddddddddd'
     }
     $script:DirectoryIdentityName = 'neologik-directory-managed-identity-abcprd01'
+    $script:SqlIdentityName = 'neologik-sql-managed-identity-abcprd01'
+    $script:KeyVaultName = 'kvabcprd01'
+    $script:DirectoryReadersTemplateId = '88d8e3e3-8f55-4a1e-953a-9b9898b8876b'
+    $script:DirectoryReadersRoleId = 'cccccccc-3333-cccc-cccc-cccccccccccc'
     $script:EnvironmentName = 'abcprd'
     $script:DeploymentCredentialName = "github-deployments-$script:EnvironmentName"
     $script:ShortName = 'abcprd01'
@@ -184,6 +190,18 @@ BeforeAll {
             DirectoryIdentity     = $null
             # the status with which Azure refuses the creation of the managed identity.
             DirectoryIdentityCreateStatus = 0
+            # the SQL managed identity on the resource group, when the identity exists (project#3848).
+            SqlIdentity           = $null
+            # the registration state of each resource provider and preview feature; an entry
+            # absent from the table reads Registered. SlowRegistration keeps a submitted
+            # registration at Registering.
+            ProviderStates        = @{}
+            FeatureStates         = @{}
+            SlowRegistration      = $false
+            # the Key Vault's access model and the deployment storage account's settings, as
+            # the onboarding kit leaves them.
+            KeyVaultRbac          = $true
+            StorageSettings       = @{ allowSharedKeyAccess = $false; allowBlobPublicAccess = $false; minimumTlsVersion = 'TLS1_2' }
             # The quotas of step 5a, compliant: one Y1 instance, vCPU room for the cluster, every
             # classic model already on the Foundry account.
             Quota                 = @{
@@ -223,8 +241,40 @@ BeforeAll {
         # until the platform infrastructure deployment declares the
         # deployment identity.
         $t.Groups += @{ id = $script:Ids.AdminGroup; displayName = "Neologik Admin User Group - $script:ShortName"; members = @(@{ id = $script:Ids.Me }); appRoleAssignments = @() }
+        # the onboarding gave the Admin User Group its thirteen roles on the resource group (project#3848).
+        foreach ($roleName in $script:AdminGroupRequiredRgRoles) {
+            $t.AzRoleAssignments += @{ ObjectId = $script:Ids.AdminGroup; RoleDefinitionName = $roleName; Scope = $script:RgScope }
+        }
+        # the onboarding created the SQL managed identity and gave the identity Directory Readers (project#3848).
+        $t.SqlIdentity = @{ principalId = $script:Ids.SqlSpId; clientId = $script:Ids.SqlAppId }
+        $t.ServicePrincipals += New-FakeSp -Id $script:Ids.SqlSpId -AppId $script:Ids.SqlAppId -DisplayName $script:SqlIdentityName
+        $t.DirectoryRoles += @{ Id = $script:DirectoryReadersRoleId; RoleTemplateId = $script:DirectoryReadersTemplateId; DisplayName = 'Directory Readers'; members = @($script:Ids.SqlSpId) }
         $t.SqlServers += @{ ServerName = "sql-main-$script:ShortName"; AdminObjectId = $script:Ids.AdminGroup; AdminDisplayName = 'SQL Administrators' }
         return $t
+    }
+
+    function Set-LegacyAdminGroupState {
+        # The Admin User Group as a v4 onboarding left it (cclprd, 5 November 2026): three
+        # roles on the subscription, ten of the thirteen roles on the resource group with
+        # Contributor held through the subscription, four extra roles on the resource group
+        # and one role on a storage account below the group.
+        $t = $script:Tenant
+        $t.AzRoleAssignments = @($t.AzRoleAssignments | Where-Object { $_.ObjectId -ne $script:Ids.AdminGroup })
+        foreach ($roleName in @('Contributor', 'Cost Management Contributor', 'Monitoring Contributor')) {
+            $t.AzRoleAssignments += @{ ObjectId = $script:Ids.AdminGroup; RoleDefinitionName = $roleName; Scope = $script:SubScope }
+        }
+        foreach ($roleName in @('Azure Kubernetes Service RBAC Cluster Admin', 'Key Vault Administrator', 'Key Vault Secrets Officer', 'Storage Blob Data Owner',
+                'Storage Blob Data Contributor', 'Storage Table Data Contributor', 'Cognitive Services Data Reader', 'Cognitive Services OpenAI Contributor',
+                'Search Index Data Reader', 'Azure AI Developer', 'AzureML Data Scientist', 'Cognitive Services Contributor', 'Cosmos DB Account Reader Role', 'Search Service Contributor')) {
+            $t.AzRoleAssignments += @{ ObjectId = $script:Ids.AdminGroup; RoleDefinitionName = $roleName; Scope = $script:RgScope }
+        }
+        $t.AzRoleAssignments += @{ ObjectId = $script:Ids.AdminGroup; RoleDefinitionName = 'Storage Blob Data Reader'; Scope = "$script:RgScope/providers/Microsoft.Storage/storageAccounts/stfilesabcprd01" }
+    }
+
+    function Get-AdminGroupRoles {
+        param([string]$Scope)
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.AdminGroup -and $_.Scope -eq $Scope } |
+            ForEach-Object { $_.RoleDefinitionName } | Sort-Object)
     }
 
     function Add-CompliantDirectoryState {
@@ -457,6 +507,30 @@ BeforeAll {
             '^/me$' { return @{ StatusCode = 200; Headers = @{}; Body = @{ id = $t.Me; userPrincipalName = 'admin@contoso.com'; displayName = 'Contoso Administrator' } } }
             '^/me/memberOf/microsoft\.graph\.directoryRole$' {
                 return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items @($t.MeDirectoryRoles) -Uri $Uri -Query $query) }
+            }
+            '^/directoryRoles$' {
+                # The directory role objects of the tenant (project#3848): a role is activated from
+                # its template with POST, and read back by template with a filter.
+                if ($Method -eq 'POST') {
+                    $role = @{ Id = [guid]::NewGuid().ToString(); RoleTemplateId = [string]$json.roleTemplateId; DisplayName = 'Directory Readers'; members = @() }
+                    $t.DirectoryRoles += $role
+                    Add-Write "POST directory role $($json.roleTemplateId)"
+                    return @{ StatusCode = 201; Headers = @{}; Body = @{ id = $role.Id; roleTemplateId = $role.RoleTemplateId; displayName = $role.DisplayName } }
+                }
+                $filter = Get-QueryValue -Query $query -Name '$filter'
+                $roles = @($t.DirectoryRoles)
+                if ($filter -match "^roleTemplateId eq '(.+)'$") { $template = $Matches[1]; $roles = @($t.DirectoryRoles | Where-Object { $_.RoleTemplateId -eq $template }) }
+                $items = @($roles | ForEach-Object { @{ id = $_.Id; roleTemplateId = $_.RoleTemplateId; displayName = [string](Get-NeologikProperty $_ 'DisplayName' '') } })
+                return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items $items -Uri $Uri -Query $query) }
+            }
+            '^/directoryRoles/([^/]+)/members/\$ref$' {
+                $role = @($t.DirectoryRoles | Where-Object { $_.Id -eq $Matches[1] }) | Select-Object -First 1
+                if (-not $role) { return @{ StatusCode = 404; Headers = @{}; Body = @{ error = @{ code = 'Request_ResourceNotFound'; message = 'not found' } } } }
+                $memberId = ($json['@odata.id'] -split '/')[-1]
+                if ($role.members -contains $memberId) { return @{ StatusCode = 400; Headers = @{}; Body = @{ error = @{ code = 'Request_BadRequest'; message = 'One or more added object references already exist' } } } }
+                $role.members += $memberId
+                Add-Write "POST directory role member $($role.Id) $memberId"
+                return @{ StatusCode = 204; Headers = @{}; Body = $null }
             }
             '^/applications$' {
                 $filter = Get-QueryValue -Query $query -Name '$filter'
@@ -745,6 +819,8 @@ BeforeAll {
         if (-not $Parameters.ContainsKey('KitVersion')) { $Parameters = $Parameters + @{ KitVersion = $script:KitVersion } }
         if (-not $Parameters.ContainsKey('DirectoryIdentityName')) { $Parameters = $Parameters + @{ DirectoryIdentityName = $script:DirectoryIdentityName } }
         if (-not $Parameters.ContainsKey('EnvironmentName')) { $Parameters = $Parameters + @{ EnvironmentName = $script:EnvironmentName } }
+        if (-not $Parameters.ContainsKey('SqlIdentityName')) { $Parameters = $Parameters + @{ SqlIdentityName = $script:SqlIdentityName } }
+        if (-not $Parameters.ContainsKey('KeyVaultName')) { $Parameters = $Parameters + @{ KeyVaultName = $script:KeyVaultName } }
         $output = @(Invoke-NeologikEnvironmentMigration @Parameters)
         $output.Count | Should -Be 1 -Because 'the main entry must emit exactly one object: the exit code'
         $output[0] | Should -BeOfType [int]
@@ -915,6 +991,61 @@ BeforeAll {
     # Azure Resource Manager reads of the quota step (5a): routed by path to the quota fixture.
     Mock Invoke-AzRestMethod {
         param($Method, $Path, $Payload)
+        if ($Path -match 'Microsoft\.ManagedIdentity/userAssignedIdentities/([^/?]+)' -and $Matches[1] -eq $script:SqlIdentityName) {
+            # The SQL managed identity of the kit standard (project#3848): read, never written.
+            if (-not $script:Tenant.SqlIdentity) { return [pscustomobject]@{ StatusCode = 404; Content = '{"error":{"code":"ResourceNotFound","message":"absent"}}' } }
+            return [pscustomobject]@{ StatusCode = 200; Content = (@{ name = $script:SqlIdentityName; properties = $script:Tenant.SqlIdentity } | ConvertTo-Json -Depth 5) }
+        }
+        if ($Path -match '^/subscriptions/[^/]+/providers/Microsoft\.Features/providers/([^/]+)/features/([^/?]+)(/register)?\?api-version=') {
+            $key = "$($Matches[1])/$($Matches[2])"
+            if ($Method -eq 'POST') {
+                Add-Write "REGISTER feature $key"
+                $script:Tenant.FeatureStates[$key] = $(if ($script:Tenant.SlowRegistration) { 'Registering' } else { 'Registered' })
+                return [pscustomobject]@{ StatusCode = 200; Content = '{}' }
+            }
+            $featureState = if ($script:Tenant.FeatureStates.ContainsKey($key)) { $script:Tenant.FeatureStates[$key] } else { 'Registered' }
+            return [pscustomobject]@{ StatusCode = 200; Content = (@{ name = $key; properties = @{ state = $featureState } } | ConvertTo-Json -Depth 5) }
+        }
+        if ($Path -match '^/subscriptions/[^/]+/providers/([^/?]+)(/register)?\?api-version=') {
+            $namespace = $Matches[1]
+            if ($Method -eq 'POST') {
+                Add-Write "REGISTER provider $namespace"
+                $script:Tenant.ProviderStates[$namespace] = $(if ($script:Tenant.SlowRegistration) { 'Registering' } else { 'Registered' })
+                return [pscustomobject]@{ StatusCode = 200; Content = '{}' }
+            }
+            $providerState = if ($script:Tenant.ProviderStates.ContainsKey($namespace)) { $script:Tenant.ProviderStates[$namespace] } else { 'Registered' }
+            return [pscustomobject]@{ StatusCode = 200; Content = (@{ namespace = $namespace; registrationState = $providerState } | ConvertTo-Json -Depth 5) }
+        }
+        if ($Path -match 'Microsoft\.KeyVault/vaults/([^/?]+)\?api-version=') {
+            $vaultName = $Matches[1]
+            if ($vaultName -ne $script:KeyVaultName) { return [pscustomobject]@{ StatusCode = 404; Content = '{"error":{"code":"ResourceNotFound","message":"absent"}}' } }
+            if ($Method -eq 'PATCH') {
+                $script:Tenant.KeyVaultRbac = [bool](($Payload | ConvertFrom-Json).properties.enableRbacAuthorization)
+                Add-Write "PATCH vault $vaultName enableRbacAuthorization=$($script:Tenant.KeyVaultRbac)"
+            }
+            return [pscustomobject]@{ StatusCode = 200; Content = (@{ name = $vaultName; properties = @{ enableRbacAuthorization = $script:Tenant.KeyVaultRbac } } | ConvertTo-Json -Depth 5) }
+        }
+        if ($Path -match 'Microsoft\.Storage/storageAccounts/([^/?]+)/blobServices/default/containers/([^/?]+)\?api-version=') {
+            $containerName = $Matches[2]
+            if ($Method -eq 'PUT') {
+                $script:StorageContainers += $containerName
+                Add-Write "PUT container $containerName"
+                return [pscustomobject]@{ StatusCode = 201; Content = (@{ name = $containerName } | ConvertTo-Json) }
+            }
+            if ($script:StorageContainers -contains $containerName) { return [pscustomobject]@{ StatusCode = 200; Content = (@{ name = $containerName } | ConvertTo-Json) } }
+            return [pscustomobject]@{ StatusCode = 404; Content = '{"error":{"code":"ContainerNotFound","message":"absent"}}' }
+        }
+        if ($Path -match 'Microsoft\.Storage/storageAccounts/([^/?]+)\?api-version=') {
+            $accountName = $Matches[1]
+            if ($accountName -eq 'stneodeploymissing01') { return [pscustomobject]@{ StatusCode = 404; Content = '{"error":{"code":"ResourceNotFound","message":"absent"}}' } }
+            if ($Method -eq 'PATCH') {
+                $changes = ($Payload | ConvertFrom-Json).properties
+                $changed = @()
+                foreach ($property in @($changes.PSObject.Properties | Sort-Object Name)) { $script:Tenant.StorageSettings[$property.Name] = $property.Value; $changed += "$($property.Name)=$($property.Value)" }
+                Add-Write "PATCH storage $accountName $($changed -join ' ')"
+            }
+            return [pscustomobject]@{ StatusCode = 200; Content = (@{ name = $accountName; properties = $script:Tenant.StorageSettings } | ConvertTo-Json -Depth 5) }
+        }
         if ($Path -match 'Microsoft\.ManagedIdentity/userAssignedIdentities/([^/?]+)') {
             $identityName = $Matches[1]
             if ($Method -eq 'PUT') {
@@ -1243,7 +1374,7 @@ Context 'Modules and sign-in' {
         Should -Invoke Get-MgServicePrincipal -Times 0
     }
 
-    It 'adds the directory role scope only with -LaterRun' {
+    It 'adds the directory role scope in both runs and the group scopes to the run that needs them' {
         Add-CompliantPreWindowState
         $graphScopes = {
             $request = @($script:TokenRequests | Where-Object { $_.Uri -match '/devicecode$' -and $_.Body.client_id -eq '14d82eec-204b-4c2f-b7e8-296a70dab67e' }) | Select-Object -Last 1
@@ -1257,7 +1388,8 @@ Context 'Modules and sign-in' {
         (& $graphScopes) | Should -Not -Contain 'DelegatedPermissionGrant.ReadWrite.All'
         $script:TokenRequests = @()
         $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
-        (& $graphScopes) | Should -Not -Contain 'RoleManagement.ReadWrite.Directory'
+        # Both runs assign the directory role of the SQL managed identity (project#3848).
+        (& $graphScopes) | Should -Contain 'RoleManagement.ReadWrite.Directory'
         (& $graphScopes) | Should -Not -Contain 'DelegatedPermissionGrant.ReadWrite.All'
     }
 
@@ -1270,8 +1402,8 @@ Context 'Modules and sign-in' {
         $scopes | Should -Contain 'Directory.Read.All'
         $scopes | Should -Contain 'User.Read'
         $scopes | Should -Contain 'AppRoleAssignment.ReadWrite.All'
-        # The pre migration script removes no directory role (project#3170): the scope belongs to the post migration script.
-        $scopes | Should -Not -Contain 'RoleManagement.ReadWrite.Directory'
+        # Both runs assign the directory role Directory Readers to the SQL managed identity (project#3848).
+        $scopes | Should -Contain 'RoleManagement.ReadWrite.Directory'
         $scopes | Should -Contain 'GroupMember.ReadWrite.All'
         $scopes | Should -Contain 'AgentIdentityBlueprintPrincipal.ReadWrite.All'
         $scopes | Should -Not -Contain 'DelegatedPermissionGrant.ReadWrite.All'
@@ -1918,8 +2050,9 @@ Context 'The pre migration script on an environment with missing state' {
                 elseif ($_ -like 'NEW az role*') { 'az-create' }
                 elseif ($_ -like 'REMOVE az role*') { 'az-remove' }
                 elseif ($_ -like 'REMOVE directory role member*') { 'role-remove' }
+                elseif ($_ -like 'POST directory role*') { 'kit-item' }
                 else { $_ } })
-        @($kinds | Select-Object -Unique) | Should -Be @('graph-grant', 'graph-remove', 'az-create', 'az-remove', 'role-remove')
+        @($kinds | Where-Object { $_ -ne 'kit-item' } | Select-Object -Unique) | Should -Be @('graph-grant', 'graph-remove', 'az-create', 'az-remove', 'role-remove')
         Should -Invoke Connect-AzAccount -Times 1
     }
 
@@ -2540,7 +2673,7 @@ Context 'The post migration script: permission reduction (step 6)' {
         Get-SummaryResult 'Subscription role to remove: User Access Administrator' | Should -Be 'Removed'
         Get-SummaryResult 'Application Administrator role' | Should -Be 'Removed'
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.Scope -eq $script:SubScope }).RoleDefinitionName | Should -Be @('Reader', 'Cost Management Contributor', 'Role Based Access Control Administrator')
-        @($script:Tenant.DirectoryRoles)[0].members | Should -HaveCount 0
+        @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AppAdminRole })[0].members | Should -HaveCount 0
     }
 
     It 'does not mistake an inherited subscription role for the resource-group assignment' {
@@ -2549,7 +2682,8 @@ Context 'The post migration script: permission reduction (step 6)' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'Assigned'
-        @($script:Tenant.AzRoleAssignments | Where-Object { $_.RoleDefinitionName -eq 'Contributor' -and $_.Scope -eq $script:RgScope }) | Should -HaveCount 1
+        # The Admin User Group holds Contributor on the resource group too (the onboarding kit's set): count the deployment identity's own assignment.
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.DeploySpId -and $_.RoleDefinitionName -eq 'Contributor' -and $_.Scope -eq $script:RgScope }) | Should -HaveCount 1
     }
 
     It 'leaves the broad grants in place when a narrow role could not be applied, after the directory checks ran' {
@@ -2563,7 +2697,7 @@ Context 'The post migration script: permission reduction (step 6)' {
         Get-SummaryResult 'Application Administrator role' | Should -Be 'SKIPPED: the deployment identity does not hold all ten Azure roles'
         Should -Invoke Remove-AzRoleAssignment -Times 0
         Should -Invoke Remove-MgDirectoryRoleMemberDirectoryObjectByRef -Times 0
-        @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
+        @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AppAdminRole })[0].members | Should -Contain $script:Ids.DeploySpId
         @($script:Tenant.AzRoleAssignments | Where-Object { $_.Scope -eq $script:SubScope -and $_.RoleDefinitionName -eq 'Contributor' }) | Should -HaveCount 1
         Get-SummaryResult 'Deployment identity permission to remove: Group.Create' | Should -Be 'Not held'
     }
@@ -2756,7 +2890,7 @@ Context 'The post migration script: permission reduction (step 6)' {
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         (Get-SummaryResult 'Application Administrator role') | Should -Match '^FAILED'
-        @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
+        @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AppAdminRole })[0].members | Should -Contain $script:Ids.DeploySpId
     }
 
     It 'finds the directory roles through the identity''s memberOf list, never through a role''s member list' {
@@ -2848,7 +2982,7 @@ Context 'Verify-only run (-Verify)' {
         $json.verifyOnly | Should -BeTrue
         $json.pendingChangeCount | Should -BeGreaterThan 10
         (Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | Should -HaveCount 1
-        @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
+        @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AppAdminRole })[0].members | Should -Contain $script:Ids.DeploySpId
         Should -Invoke Connect-MgGraph -Times 1
         Should -Invoke Connect-AzAccount -Times 1
     }
@@ -2877,7 +3011,7 @@ Context 'Verify-only run (-Verify)' {
         $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PostWindow_*.json')
         $files | Should -HaveCount 1
         (Get-FakeSp -Id $script:Ids.DeploySpId).appRoleAssignments | Should -HaveCount 3
-        @($script:Tenant.DirectoryRoles)[0].members | Should -Contain $script:Ids.DeploySpId
+        @($script:Tenant.DirectoryRoles | Where-Object { $_.Id -eq $script:Ids.AppAdminRole })[0].members | Should -Contain $script:Ids.DeploySpId
     }
 
     It 'the write seams refuse every write in a verify-only run, whatever the caller does' {
@@ -3575,7 +3709,7 @@ Context 'Step 5a: the Azure quotas that the migration needs' {
 
     It 'reports Review and continues when Azure refuses a quota read' {
         Add-CompliantPreWindowState
-        Mock Invoke-AzRestMethod { param($Method, $Path) if ($Path -match 'userAssignedIdentities') { return [pscustomobject]@{ StatusCode = 200; Content = (@{ properties = $script:Tenant.DirectoryIdentity } | ConvertTo-Json -Depth 5) } }; if ($Path -match 'Microsoft\.Quota/quotas') { return [pscustomobject]@{ StatusCode = 403; Content = '{"error":{"code":"AuthorizationFailed","message":"The client does not have authorization"}}' } }; [pscustomobject]@{ StatusCode = 200; Content = '{"value":[]}' } }
+        Mock Invoke-AzRestMethod { param($Method, $Path) if ($Path -match "userAssignedIdentities/$script:SqlIdentityName") { return [pscustomobject]@{ StatusCode = 200; Content = (@{ properties = $script:Tenant.SqlIdentity } | ConvertTo-Json -Depth 5) } }; if ($Path -match 'userAssignedIdentities') { return [pscustomobject]@{ StatusCode = 200; Content = (@{ properties = $script:Tenant.DirectoryIdentity } | ConvertTo-Json -Depth 5) } }; if ($Path -match 'Microsoft\.Quota/quotas') { return [pscustomobject]@{ StatusCode = 403; Content = '{"error":{"code":"AuthorizationFailed","message":"The client does not have authorization"}}' } }; if ($Path -match '/providers/Microsoft\.Features/') { return [pscustomobject]@{ StatusCode = 200; Content = '{"properties":{"state":"Registered"}}' } }; if ($Path -match '^/subscriptions/[^/]+/providers/[^/?]+\?api-version=') { return [pscustomobject]@{ StatusCode = 200; Content = '{"registrationState":"Registered"}' } }; if ($Path -match 'Microsoft\.KeyVault/vaults/') { return [pscustomobject]@{ StatusCode = 200; Content = '{"properties":{"enableRbacAuthorization":true}}' } }; [pscustomobject]@{ StatusCode = 200; Content = '{"value":[]}' } }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         Get-SummaryResult 'Quota: App Service Y1 instances' | Should -Match '^Review: the quota could not be read\. .*HTTP 403\. The client does not have authorization'
@@ -3586,7 +3720,8 @@ Context 'Step 5a: the Azure quotas that the migration needs' {
     It 'checks no quota in the post migration script' {
         Add-CompliantPreWindowState
         $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
-        Should -Invoke Invoke-AzRestMethod -Times 0 -ParameterFilter { $Path -notmatch 'userAssignedIdentities' }
+        # The kit standard reads the managed identities, the providers, the Key Vault and the storage account in both runs (project#3848); the quota paths stay out of the post run.
+        Should -Invoke Invoke-AzRestMethod -Times 0 -ParameterFilter { $Path -notmatch 'userAssignedIdentities|/providers/Microsoft\.Features/|^/subscriptions/[^/]+/providers/[^/?]+\?api-version=|Microsoft\.KeyVault/vaults|Microsoft\.Storage/storageAccounts' }
     }
 }
 
@@ -3889,6 +4024,307 @@ Context 'Snapshot, upload and the file list (project#3171)' {
         $text | Should -Match 'NeologikEnvironmentMigration_\d+_\d+\.log'
         $text | Should -Match 'Neologik_EnvironmentMigration_PreWindow_'
         $text | Should -Not -Match 'Snapshot_'
+    }
+}
+
+
+Context 'Helpers: a Microsoft Graph PowerShell dictionary (project#3847)' {
+    It 'reads a generic dictionary, such as AdditionalProperties of a Microsoft Graph PowerShell object' {
+        $extra = [System.Collections.Generic.Dictionary[string, object]]::new()
+        $extra['@odata.type'] = '#microsoft.graph.directoryRole'
+        $extra['displayName'] = 'Directory Readers'
+        Get-NeologikProperty $extra '@odata.type' | Should -Be '#microsoft.graph.directoryRole'
+        Get-NeologikProperty $extra 'missing' 'dflt' | Should -Be 'dflt'
+        Test-NeologikProperty $extra 'displayName' | Should -BeTrue
+        Test-NeologikProperty $extra 'missing' | Should -BeFalse
+    }
+
+    It 'records the memberships in the snapshot instead of an error' {
+        Add-CompliantPreWindowState
+        Add-AdminGroupMembership
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_Snapshot_Pre_*.json')
+        $snapshot = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        $snapshot.deploymentIdentity.memberOf | Should -Not -BeNullOrEmpty
+        ($snapshot.deploymentIdentity.memberOf | ConvertTo-Json) | Should -Not -Match 'Cannot find an overload'
+        @($snapshot.deploymentIdentity.memberOf | Where-Object { $_.displayName -like 'Neologik Admin User Group*' }) | Should -HaveCount 1
+    }
+}
+
+Context 'The kit standard in both runs: the SQL managed identity, the providers, the Key Vault and the storage account (project#3848)' {
+    It 'changes nothing on an environment that already stands as the onboarding kit leaves it' {
+        Add-CompliantPreWindowState
+        $script:StorageAccounts = @('stneodeployabcprduks01')
+        $script:StorageContainers = @('certificate', 'json', 'logs')
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'SQL managed identity' | Should -Be "Present: $script:SqlIdentityName"
+        Get-SummaryResult 'SQL managed identity directory role: Directory Readers' | Should -Be 'Already held'
+        Get-SummaryResult 'Resource providers and preview features' | Should -Match '^Already registered: 34 resource providers and 2 preview features$'
+        Get-SummaryResult 'Key Vault access model: Azure role-based access control' | Should -Be 'Already on'
+        Get-SummaryResult 'Deployment storage account stneodeployabcprduks01 shared key access: off' | Should -Be 'Already set'
+        Get-SummaryResult 'Deployment storage account stneodeployabcprduks01 minimum TLS version: 1.2' | Should -Be 'Already set'
+        Get-SummaryResult 'Deployment storage account stneodeployabcprduks01 container: logs' | Should -Be 'Present'
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Already set: $script:KitVersion"
+    }
+
+    It 'assigns Directory Readers to the SQL managed identity, activating the role when the tenant has never used it' {
+        Add-CompliantPreWindowState
+        $script:Tenant.DirectoryRoles = @($script:Tenant.DirectoryRoles | Where-Object { $_.RoleTemplateId -ne $script:DirectoryReadersTemplateId })
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain "POST directory role $script:DirectoryReadersTemplateId"
+        @($script:Writes | Where-Object { $_ -like "POST directory role member * $($script:Ids.SqlSpId)" }) | Should -HaveCount 1
+        Get-SummaryResult 'SQL managed identity directory role: Directory Readers' | Should -Be 'Assigned'
+        $role = @($script:Tenant.DirectoryRoles | Where-Object { $_.RoleTemplateId -eq $script:DirectoryReadersTemplateId })[0]
+        $role.members | Should -Contain $script:Ids.SqlSpId
+    }
+
+    It 'assigns the role to an existing role object without activating the role again' {
+        Add-CompliantPreWindowState
+        $role = @($script:Tenant.DirectoryRoles | Where-Object { $_.RoleTemplateId -eq $script:DirectoryReadersTemplateId })[0]
+        $role.members = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        @($script:Writes | Where-Object { $_ -like 'POST directory role 8*' }) | Should -HaveCount 0
+        $script:Writes | Should -Contain "POST directory role member $script:DirectoryReadersRoleId $($script:Ids.SqlSpId)"
+    }
+
+    It 'reports a missing SQL managed identity and holds the kit version tag' {
+        Add-CompliantPreWindowState
+        $script:Tenant.SqlIdentity = $null
+        $script:Tenant.ResourceGroupTags = @{ NeologikOnboardingKit = 'v5.0.10' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        (Get-SummaryResult 'SQL managed identity') | Should -Match '^MISSING: the managed identity'
+        (Get-SummaryResult 'Onboarding kit version tag') | Should -Match '^SKIPPED'
+        $script:Tenant.ResourceGroupTags['NeologikOnboardingKit'] | Should -Be 'v5.0.10'
+    }
+
+    It 'registers the resource providers and preview features that the subscription lacks and waits for them' {
+        Add-CompliantPreWindowState
+        $script:Tenant.ProviderStates['Microsoft.VideoIndexer'] = 'NotRegistered'
+        $script:Tenant.ProviderStates['Microsoft.ServiceNetworking'] = 'NotRegistered'
+        $script:Tenant.FeatureStates['Microsoft.ContainerService/AzureLinuxCVMPreview'] = 'NotRegistered'
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain 'REGISTER provider Microsoft.VideoIndexer'
+        $script:Writes | Should -Contain 'REGISTER provider Microsoft.ServiceNetworking'
+        $script:Writes | Should -Contain 'REGISTER feature Microsoft.ContainerService/AzureLinuxCVMPreview'
+        Get-SummaryResult 'Resource provider: Microsoft.VideoIndexer' | Should -Be 'Registered'
+        Get-SummaryResult 'Preview feature: Microsoft.ContainerService/AzureLinuxCVMPreview' | Should -Be 'Registered'
+        Get-SummaryResult 'Resource provider: Microsoft.Storage' | Should -BeNullOrEmpty
+        # The script waited for the registrations, reading the state between the reads.
+        @($script:Sleeps | Where-Object { $_ -eq $script:ProviderPollSeconds }).Count | Should -BeGreaterOrEqual 1
+    }
+
+    It 'reports a registration that Azure has not finished as pending and holds the kit version tag' {
+        Add-CompliantPreWindowState
+        $script:Tenant.ProviderStates['Microsoft.VideoIndexer'] = 'NotRegistered'
+        $script:Tenant.SlowRegistration = $true
+        $script:Tenant.ResourceGroupTags = @{ NeologikOnboardingKit = 'v5.0.10' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        (Get-SummaryResult 'Resource provider: Microsoft.VideoIndexer') | Should -Match '^PENDING: the registration is in progress'
+        @($script:Sleeps | Where-Object { $_ -eq $script:ProviderPollSeconds }).Count | Should -Be $script:ProviderRegistrationPolls
+        (Get-SummaryResult 'Onboarding kit version tag') | Should -Match '^SKIPPED'
+    }
+
+    It 'turns on Azure role-based access control on a Key Vault that uses access policies' {
+        Add-CompliantPreWindowState
+        $script:Tenant.KeyVaultRbac = $false
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain "PATCH vault $script:KeyVaultName enableRbacAuthorization=True"
+        Get-SummaryResult 'Key Vault access model: Azure role-based access control' | Should -Be 'Set'
+        $script:Tenant.KeyVaultRbac | Should -BeTrue
+    }
+
+    It 'brings the deployment storage account to the settings and containers of the onboarding kit' {
+        Add-CompliantPreWindowState
+        $script:StorageAccounts = @('stneodeployabcprduks01')
+        $script:StorageContainers = @('certificate')
+        $script:Tenant.StorageSettings = @{ allowSharedKeyAccess = $true; allowBlobPublicAccess = $false; minimumTlsVersion = 'TLS1_0' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain 'PATCH storage stneodeployabcprduks01 allowSharedKeyAccess=False minimumTlsVersion=TLS1_2'
+        $script:Writes | Should -Contain 'PUT container json'
+        $script:Writes | Should -Contain 'PUT container logs'
+        $script:Writes | Should -Not -Contain 'PUT container certificate'
+        Get-SummaryResult 'Deployment storage account stneodeployabcprduks01 shared key access: off' | Should -Be 'Set'
+        Get-SummaryResult 'Deployment storage account stneodeployabcprduks01 public blob access: off' | Should -Be 'Already set'
+        Get-SummaryResult 'Deployment storage account stneodeployabcprduks01 minimum TLS version: 1.2' | Should -Be 'Set'
+        Get-SummaryResult 'Deployment storage account stneodeployabcprduks01 container: json' | Should -Be 'Created'
+        Get-SummaryResult 'Deployment storage account stneodeployabcprduks01 container: certificate' | Should -Be 'Present'
+        $script:Tenant.StorageSettings.minimumTlsVersion | Should -Be 'TLS1_2'
+    }
+
+    It 'checks no storage account when the resource group holds no deployment storage account' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Deployment storage account' | Should -Match '^Not checked: no storage account named stneodeploy'
+    }
+
+    It 'with -Verify reports every pending item of the kit standard and writes nothing' {
+        Add-CompliantPreWindowState
+        $script:Tenant.SqlIdentity = @{ principalId = $script:Ids.SqlSpId; clientId = $script:Ids.SqlAppId }
+        $role = @($script:Tenant.DirectoryRoles | Where-Object { $_.RoleTemplateId -eq $script:DirectoryReadersTemplateId })[0]
+        $role.members = @()
+        $script:Tenant.ProviderStates['Microsoft.VideoIndexer'] = 'NotRegistered'
+        $script:Tenant.KeyVaultRbac = $false
+        $script:StorageAccounts = @('stneodeployabcprduks01')
+        $script:Tenant.StorageSettings = @{ allowSharedKeyAccess = $true; allowBlobPublicAccess = $true; minimumTlsVersion = 'TLS1_2' }
+        $script:Tenant.ResourceGroupTags = @{ NeologikOnboardingKit = 'v5.0.10' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'SQL managed identity directory role: Directory Readers' | Should -Be 'WOULD ASSIGN'
+        Get-SummaryResult 'Resource provider: Microsoft.VideoIndexer' | Should -Be 'WOULD REGISTER'
+        Get-SummaryResult 'Key Vault access model: Azure role-based access control' | Should -Be 'WOULD SET'
+        Get-SummaryResult 'Deployment storage account stneodeployabcprduks01 shared key access: off' | Should -Be 'WOULD SET'
+        Get-SummaryResult 'Deployment storage account stneodeployabcprduks01 container: json' | Should -Be 'WOULD CREATE'
+        (Get-SummaryResult 'Onboarding kit version tag') | Should -Match '^WOULD SET'
+    }
+
+    It 'the post migration script confirms the same items' {
+        Add-CompliantPreWindowState
+        $script:Tenant.ProviderStates['Microsoft.VideoIndexer'] = 'NotRegistered'
+        $role = @($script:Tenant.DirectoryRoles | Where-Object { $_.RoleTemplateId -eq $script:DirectoryReadersTemplateId })[0]
+        $role.members = @()
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain 'REGISTER provider Microsoft.VideoIndexer'
+        Get-SummaryResult 'SQL managed identity directory role: Directory Readers' | Should -Be 'Assigned'
+        Get-SummaryResult 'Resource provider: Microsoft.VideoIndexer' | Should -Be 'Registered'
+        Get-SummaryResult 'Key Vault access model: Azure role-based access control' | Should -Be 'Already on'
+    }
+
+    It 'skips the items of the kit standard with the rest when the sign-in to Azure fails' {
+        Add-CompliantPreWindowState
+        Mock Connect-AzAccount { throw 'AADSTS50076: multi-factor authentication required' }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        (Get-SummaryResult 'SQL managed identity') | Should -Match '^SKIPPED'
+        (Get-SummaryResult 'Resource providers and preview features') | Should -Match '^SKIPPED'
+        (Get-SummaryResult 'Admin User Group other roles') | Should -Match '^SKIPPED'
+    }
+
+    It 'refuses a command without the SQL managed identity name or the Key Vault name before any sign-in' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); SqlIdentityName = '' }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'The command does not give SqlIdentityName'
+        Should -Invoke Connect-MgGraph -Times 0
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); KeyVaultName = 'Not A Vault' }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'KeyVaultName must be the name of a Key Vault'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
+}
+
+Context 'The post migration script: the Admin User Group roles (step 6j, project#3848)' {
+    It 'brings the Admin User Group to the thirteen roles of the onboarding kit and removes the rest in the subscription' {
+        Add-CompliantPreWindowState
+        Set-LegacyAdminGroupState
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain "NEW az role Contributor $script:RgScope"
+        $script:Writes | Should -Contain "NEW az role Azure Kubernetes Service Cluster Admin Role $script:RgScope"
+        $script:Writes | Should -Contain "NEW az role Key Vault Certificates Officer $script:RgScope"
+        $script:Writes | Should -Contain "REMOVE az role Contributor $script:SubScope"
+        $script:Writes | Should -Contain "REMOVE az role Cost Management Contributor $script:SubScope"
+        $script:Writes | Should -Contain "REMOVE az role Monitoring Contributor $script:SubScope"
+        $script:Writes | Should -Contain "REMOVE az role AzureML Data Scientist $script:RgScope"
+        $script:Writes | Should -Contain "REMOVE az role Cosmos DB Account Reader Role $script:RgScope"
+        $script:Writes | Should -Contain "REMOVE az role Search Service Contributor $script:RgScope"
+        $script:Writes | Should -Contain "REMOVE az role Storage Blob Data Reader $script:RgScope/providers/Microsoft.Storage/storageAccounts/stfilesabcprd01"
+        Get-SummaryResult 'Admin User Group resource group role: Contributor' | Should -Be 'Assigned'
+        Get-SummaryResult 'Admin User Group resource group role: Key Vault Administrator' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Admin User Group other role: Contributor on subscription' | Should -Be 'Removed'
+        Get-SummaryResult 'Admin User Group other role: Storage Blob Data Reader on stfilesabcprd01' | Should -Be 'Removed'
+        Get-AdminGroupRoles $script:SubScope | Should -HaveCount 0
+        Get-AdminGroupRoles $script:RgScope | Should -Be @($script:AdminGroupRequiredRgRoles | Sort-Object)
+        # The deployment identity's own roles are untouched by the step.
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.DeploySpId }) | Should -HaveCount 10
+    }
+
+    It 'changes nothing for an Admin User Group that already holds exactly the thirteen roles' {
+        Add-CompliantPreWindowState
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'Admin User Group resource group role: Azure AI Developer' | Should -Be 'Already assigned'
+        Get-SummaryResult 'Admin User Group other roles' | Should -Be 'None'
+    }
+
+    It 'lists a role outside the subscription for review and removes nothing there' {
+        Add-CompliantPreWindowState
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $script:Ids.AdminGroup; RoleDefinitionName = 'Reader'; Scope = '/subscriptions/99999999-0000-0000-0000-000000000000' }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        $script:Writes | Should -HaveCount 0
+        (Get-SummaryResult 'Admin User Group role outside the subscription: Reader on subscription') | Should -Match '^Review'
+        Get-SummaryResult 'Admin User Group other roles' | Should -Be 'None'
+    }
+
+    It 'removes no role when one of the thirteen roles could not be assigned' {
+        Add-CompliantPreWindowState
+        Set-LegacyAdminGroupState
+        Mock New-AzRoleAssignment { param($ObjectId, $RoleDefinitionName, $Scope) if ($ObjectId -eq $script:Ids.AdminGroup -and $RoleDefinitionName -eq 'Key Vault Certificates Officer') { throw 'AuthorizationFailed: The client does not have authorization' }; $script:Tenant.AzRoleAssignments += @{ ObjectId = $ObjectId; RoleDefinitionName = $RoleDefinitionName; Scope = $Scope }; Add-Write "NEW az role $RoleDefinitionName $Scope" }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        (Get-SummaryResult 'Admin User Group resource group role: Key Vault Certificates Officer') | Should -Match '^FAILED: insufficient privileges'
+        Get-SummaryResult 'Admin User Group other roles' | Should -Be 'SKIPPED: the Admin User Group does not hold all thirteen roles on the resource group'
+        Get-AdminGroupRoles $script:SubScope | Should -Be @('Contributor', 'Cost Management Contributor', 'Monitoring Contributor')
+        (Get-SummaryResult 'Onboarding kit version tag') | Should -Match '^SKIPPED'
+    }
+
+    It 'with -Verify reports the additions and the removals as pending and writes nothing' {
+        Add-CompliantPreWindowState
+        Set-LegacyAdminGroupState
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        $script:Writes | Should -HaveCount 0
+        Get-SummaryResult 'Admin User Group resource group role: Contributor' | Should -Be 'WOULD ASSIGN'
+        Get-SummaryResult 'Admin User Group other role: Contributor on subscription' | Should -Be 'WOULD REMOVE'
+        Get-SummaryResult 'Admin User Group other role: AzureML Data Scientist on resource group' | Should -Be 'WOULD REMOVE'
+    }
+
+    It 'skips the Admin User Group rows with the rest when the deployment identity lacks a role' {
+        Add-CompliantDirectoryState
+        Add-LegacyAzureState
+        Set-LegacyAdminGroupState
+        Mock New-AzRoleAssignment { param($RoleDefinitionName) if ($RoleDefinitionName -eq 'Monitoring Contributor') { throw 'AuthorizationFailed: The client does not have authorization' }; Add-Write "NEW az role $RoleDefinitionName $Scope" }
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult 'Admin User Group other roles' | Should -Be 'SKIPPED: the deployment identity does not hold all ten Azure roles'
+        Get-AdminGroupRoles $script:SubScope | Should -Be @('Contributor', 'Cost Management Contributor', 'Monitoring Contributor')
+    }
+
+    It 'confirms Key Vault Secrets Officer for the script runner identity beside Reader' {
+        Add-CompliantPreWindowState
+        Add-LegacyScriptRunnerState
+        $script:Tenant.AzRoleAssignments = @($script:Tenant.AzRoleAssignments | Where-Object { -not ($_.ObjectId -eq $script:Ids.ScriptRunnerId -and $_.RoleDefinitionName -eq 'Key Vault Secrets Officer') })
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile); ScriptRunnerObjectId = $script:Ids.ScriptRunnerId }
+        $code | Should -Be 0
+        $script:Writes | Should -Contain "NEW az role Key Vault Secrets Officer $script:RgScope"
+        Get-SummaryResult 'Script runner identity resource group role: Key Vault Secrets Officer' | Should -Be 'Assigned'
+        Get-ScriptRunnerRoles $script:RgScope | Should -Be @('Azure Bot Service Contributor Role', 'Key Vault Secrets Officer', 'Reader')
+    }
+
+    It 'leaves the Admin User Group alone when neither the command nor the directory names the group' {
+        Add-CompliantPreWindowState
+        Set-LegacyAdminGroupState
+        # The post migration script finds the group by its standard name when the command gives no id (step 6d); a group with a name of the customer's own is not found.
+        $adminGroup = @($script:Tenant.Groups | Where-Object { $_.id -eq $script:Ids.AdminGroup })[0]
+        $adminGroup.displayName = 'Platform Administrators'
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile -Overrides @{ SecurityGroups = @(@{ Name = "Neologik NCE User Group - $script:ShortName"; Id = $script:Ids.Group }) }) }
+        @($script:Writes | Where-Object { $_ -like "* $script:SubScope" -and $_ -like 'REMOVE*Monitoring Contributor*' }) | Should -HaveCount 0
+        Get-SummaryResult 'Admin User Group roles' | Should -Be 'Not checked: the command does not name the Admin User Group'
+        Get-AdminGroupRoles $script:SubScope | Should -Be @('Contributor', 'Cost Management Contributor', 'Monitoring Contributor')
     }
 }
 
