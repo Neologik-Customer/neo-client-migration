@@ -2343,6 +2343,16 @@ Context 'Platform app ownership' {
         $script:Writes | Should -HaveCount 0
     }
 
+    It 'leaves the application registration of the deployment identity out of the review' {
+        Add-CompliantPreWindowState
+        # In a customer tenant the registration of the deployment identity carries the platform name.
+        (Get-FakeApp -Id $script:Ids.DeployAppObj).displayName = "Neologik GitHub Service Connection - $script:ShortName"
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult "Registration not on the list: 'Neologik GitHub Service Connection - $script:ShortName'" | Should -BeNullOrEmpty
+        $script:Writes | Should -HaveCount 0
+    }
+
     It 'adopts exactly the listed registrations and only reports the rest' {
         Add-CompliantPreWindowState
         $t = $script:Tenant

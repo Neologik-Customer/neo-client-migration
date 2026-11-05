@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.13](#version-1113)
 2. [Version 1.1.12](#version-1112)
 2. [Version 1.1.11](#version-1111)
 2. [Version 1.1.10](#version-1110)
@@ -36,7 +37,17 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.12 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.13 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.13
+
+**Date**: 2026-11-05
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| The pre migration script, the ownership of the application registrations | From this version the summary leaves the application registration of the deployment identity out of `Registration not on the list`. The command names the deployment identity, so that application registration needs no review. Before this version the summary listed that application registration and asked you to tell Neologik whether the Neologik Platform uses that application registration |
 
 ## Version 1.1.12
 
