@@ -3337,6 +3337,25 @@ Context 'The post migration script: Admin User Group membership' {
         @((Get-FakeGroup -Id $script:Ids.AdminGroup).members | ForEach-Object { $_.id }) | Should -Contain $script:Ids.Me
     }
 
+    It 'finds the membership in the identity''s memberOf list when the group''s member list leaves out the identity' {
+        # Graph's groups/{id}/members returned the users of the Admin User Group and
+        # left out the deployment identity on a customer tenant (verified 2026-11-05).
+        # The fake member list does the same, so a return to that read fails here.
+        Mock Get-MgGroupMember {
+            param($GroupId)
+            $group = @($script:Tenant.Groups | Where-Object { $_.id -eq $GroupId }) | Select-Object -First 1
+            @($group.members | Where-Object { $_.id -ne $script:Ids.DeploySpId } | ForEach-Object { [pscustomobject]@{ Id = $_.id } })
+        }
+        Add-AdminGroupMembership
+        Set-SqlAdministrator -ObjectId $script:Ids.DeploySpId
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Admin User Group membership' | Should -Be 'Removed'
+        @((Get-FakeGroup -Id $script:Ids.AdminGroup).members | ForEach-Object { $_.id }) | Should -Not -Contain $script:Ids.DeploySpId
+        # The post migration script prints the title of each step without a step number.
+        ($script:Console -join "`n") | Should -Not -Match 'Step \d+[a-z]? of \d+'
+    }
+
     It 'keeps the membership when one of two servers still names the group' {
         Add-AdminGroupMembership
         $script:Tenant.SqlServers += @{ ServerName = 'sql-custom-01'; AdminObjectId = $script:Ids.AdminGroup; AdminDisplayName = 'SQL Administrators' }
@@ -3644,7 +3663,7 @@ Context 'Log file and summary file on every exit (project#3170)' {
         $logs | Should -HaveCount 1
         $log = Get-Content -LiteralPath $logs[0].FullName -Raw
         $log | Should -Match '\[Graph\] GET .*/applications.* returned HTTP 403\. request-id req-0001\. .*Authorization_RequestDenied: Insufficient privileges'
-        $log | Should -Match 'Step 1a of 5'
+        $log | Should -Match 'The agent identity blueprint'
         $log | Should -Match 'SUMMARY'
         $log | Should -Match '\[Summary\] Agent identity blueprint: FAILED'
     }
@@ -3675,7 +3694,9 @@ Context 'Step 5a: the Azure quotas that the migration needs' {
         @($script:ArmReads | Where-Object { $_ -match 'Microsoft\.Quota/quotas' }) | Should -HaveCount 1
         @($script:ArmReads | Where-Object { $_ -match '/agentPools\?' }) | Should -HaveCount 1
         Should -Invoke Invoke-AzRestMethod -Times 0 -ParameterFilter { $Method -ne 'GET' }
-        ($script:Console -join "`n") | Should -Match 'Step 5a of 5: the Azure quotas that the migration needs'
+        ($script:Console -join "`n") | Should -Match 'The Azure quotas that the migration needs'
+        # The run prints the title of each step without a step number.
+        ($script:Console -join "`n") | Should -Not -Match 'Step \d+[a-z]? of \d+'
     }
 
     It 'reports SHORT and needs attention when the subscription has no Y1 instance' {
