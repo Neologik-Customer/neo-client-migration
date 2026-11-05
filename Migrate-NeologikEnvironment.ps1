@@ -4491,7 +4491,7 @@ function Set-NeologikDirectoryIdentity {
     return ([bool]$outcome.Complete -and $outcome.Pending -eq 0 -and -not $state.OwnerWriteFailed)
 }
 
-# ----- The items of the onboarding kit that both runs confirm (project#3848) -----------------
+# ----- The items of the onboarding kit that both runs confirm ------------------------------
 # After the post migration script the environment stands where a greenfield environment
 # onboarded with the current kit stands. The functions below confirm the items that the
 # kit creates for a new customer and that the steps above do not cover: the directory
