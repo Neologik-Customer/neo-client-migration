@@ -777,7 +777,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.12'
+$script:ScriptVersion = '1.1.13'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -3279,6 +3279,9 @@ function Set-NeologikPlatformAppOwnership {
             Add-Summary $entry.Item "FAILED: $(Get-NeologikErrorText $_)"
         }
     }
+    # The command also names the application registration of the deployment identity,
+    # so the review below leaves that application registration out.
+    if ($state.DeploySpClientId) { $listed[([string]$state.DeploySpClientId).ToLowerInvariant()] = $true }
     # The function reports every other application registration in this tenant whose
     # name begins 'Neologik', and changes none. The agent identity blueprint has a
     # separate step.
