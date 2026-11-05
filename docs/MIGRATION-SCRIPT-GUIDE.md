@@ -165,11 +165,11 @@ Step 5c creates no user, no group and no application registration. The migration
 
 ### Step 5a: The Azure quotas that the migration needs
 
-The migration script reads three quotas of your subscription, in the region of the environment, and changes nothing. A quota that is short needs attention before the migration, because the quota comes from Microsoft and takes days.
+The migration script reads your subscription in the region of the environment and changes nothing. The script checks the region for one Azure Functions plan and reads two quotas. A quota that is short needs attention before the migration, because the quota comes from Microsoft and takes days.
 
-| Quota | Why the migration needs it | What the summary says |
+| Check | Why the migration needs it | What the summary says |
 |---|---|---|
-| App Service Y1 instances | The schedule that starts and stops the cluster outside working hours runs as a Function App on a consumption plan, one Y1 instance | `Present: <n>`, or `SHORT: 0` with the Azure portal path to request the quota. Without the quota, Neologik runs the cluster without the schedule |
+| Flex Consumption plan in the region | The schedule that starts and stops the cluster outside working hours runs as a Function App on the Flex Consumption plan. The quota of the plan is a separate pool that every subscription holds, so you request no quota | `Present: <region>`, or `SHORT` when the region has no Flex Consumption plan. Without the plan, Neologik runs the cluster without the schedule |
 | vCPUs of the node pool family and of the region | The cluster may grow to the maximum node count of each pool, and the upgrade of the cluster adds one node per pool while it runs | `Present` with the use, the limit and the growth the cluster may need, or `SHORT` |
 | Azure OpenAI model quota | The Neologik Platform uses the models on the Foundry account. A model deployed only on the classic Azure OpenAI account is deployed on the Foundry account before the migration, within the regional quota of the model | `Model deployments on Foundry` lists what the Foundry account holds. One line per model to move: `Fits`, or `SHORT` with the free quota and the capacity the move needs |
 

@@ -777,7 +777,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.11'
+$script:ScriptVersion = '1.1.12'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -5435,8 +5435,10 @@ function Test-NeologikAzureQuota {
     check reports one summary item. A quota that is short reads SHORT and needs
     attention, so that Neologik and the administrator settle it before the migration:
     the quota comes from Microsoft and takes days.
-      - App Service Y1 instances: the start and stop schedule of the cluster runs as a
-        Function App on a consumption plan, one Y1 instance.
+      - The Flex Consumption plan: the start and stop schedule of the cluster runs as a
+        Function App on the Flex Consumption plan, which must be in the region. The quota
+        of the plan is a separate pool that every subscription holds, so the check reads
+        no quota.
       - vCPUs: the cluster may grow to the maximum node count of each pool, and the
         upgrade of the cluster adds one node per pool while it runs.
       - Azure OpenAI model quota: the Neologik Platform uses the models on the Foundry
@@ -5454,37 +5456,34 @@ function Test-NeologikAzureQuota {
         Add-Summary 'Azure quotas' 'Review: the region of the resource group could not be read, so the quotas were not checked'
         return
     }
-    Test-NeologikFunctionAppQuota -Location $location
+    Test-NeologikFunctionAppRegion -Location $location
     Test-NeologikClusterQuota -Location $location
     Test-NeologikModelQuota -Location $location
 }
 
-function Test-NeologikFunctionAppQuota {
-    # The App Service Y1 (consumption plan) instance quota in the region.
+function Test-NeologikFunctionAppRegion {
+    # Whether the region has the Flex Consumption plan, which the Function App of the start
+    # and stop schedule runs on. The plan is not in every region. Azure lists the regions by
+    # display name, so the check compares the names in lower case without spaces.
     param([string]$Location)
-    $label = 'Quota: App Service Y1 instances'
+    $label = 'Region: Flex Consumption plan'
     try {
-        $quotas = @(Get-NeologikArmList -Path "/subscriptions/$($script:State.SubscriptionId)/providers/Microsoft.Web/locations/$Location/providers/Microsoft.Quota/quotas?api-version=2023-02-01")
-        $y1 = @($quotas | Where-Object { [string](Get-NeologikProperty (Get-NeologikProperty (Get-NeologikProperty $_ 'properties') 'name') 'value' '') -eq 'Y1' }) | Select-Object -First 1
-        if ($null -eq $y1) {
-            Write-Log "  ${label}: no Y1 row in $Location" -Level Warning
-            Add-Summary $label "Review: Azure lists no Y1 quota for $Location"
-            return
-        }
-        $limit = [int](Get-NeologikProperty (Get-NeologikProperty (Get-NeologikProperty $y1 'properties') 'limit') 'value' 0)
-        if ($limit -ge 1) {
-            Write-Log "  ${label}: $limit in $Location" -Level Success
-            Add-Summary $label "Present: $limit in $Location"
+        $regions = @(Get-NeologikArmList -Path "/subscriptions/$($script:State.SubscriptionId)/providers/Microsoft.Web/geoRegions?api-version=2025-05-01&sku=FlexConsumption")
+        $wanted = ($Location -replace '\s', '').ToLowerInvariant()
+        $match = @($regions | Where-Object { ([string](Get-NeologikProperty $_ 'name' '') -replace '\s', '').ToLowerInvariant() -eq $wanted })
+        if ($match.Count -gt 0) {
+            Write-Log "  ${label}: available in $Location" -Level Success
+            Add-Summary $label "Present: $Location"
         }
         else {
-            Write-Log "  ${label}: 0 in $Location. The start and stop schedule of the cluster needs one" -Level Warning
-            Add-Summary $label "SHORT: 0 in $Location. The start and stop schedule of the cluster runs as a Function App and needs one Y1 instance. Ask Microsoft for the quota in the Azure portal, Quotas, App Service, $Location, Y1 VMs, or tell Neologik to run the cluster without the schedule"
+            Write-Log "  ${label}: not available in $Location. The start and stop schedule of the cluster needs the plan" -Level Warning
+            Add-Summary $label "SHORT: $Location has no Flex Consumption plan. The start and stop schedule of the cluster runs as a Function App on that plan. Tell Neologik to run the cluster without the schedule"
         }
     }
     catch {
         $reason = Get-NeologikErrorText $_
         Write-Log "  ${label}: could not be read. $reason" -Level Warning
-        Add-Summary $label "Review: the quota could not be read. $reason"
+        Add-Summary $label "Review: the regions could not be read. $reason"
     }
 }
 

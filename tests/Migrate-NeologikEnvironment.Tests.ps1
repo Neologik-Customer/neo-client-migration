@@ -202,10 +202,10 @@ BeforeAll {
             # the onboarding kit leaves them.
             KeyVaultRbac          = $true
             StorageSettings       = @{ allowSharedKeyAccess = $false; allowBlobPublicAccess = $false; minimumTlsVersion = 'TLS1_2' }
-            # The quotas of step 5a, compliant: one Y1 instance, vCPU room for the cluster, every
-            # classic model already on the Foundry account.
+            # The checks of step 5a, compliant: the Flex Consumption plan in the region, vCPU room
+            # for the cluster, every classic model already on the Foundry account.
             Quota                 = @{
-                Y1           = 1
+                FlexRegions  = @('Sweden Central', 'UK South')
                 ComputeUsage = @(@{ Name = 'StandardDasv7Family'; Current = 18; Limit = 350 }, @{ Name = 'cores'; Current = 18; Limit = 50 })
                 Skus         = @(@{ Name = 'standard_d2as_v7'; Family = 'StandardDasv7Family'; Vcpus = 2 })
                 Clusters     = @(@{ Id = "/subscriptions/$($script:Ids.Subscription)/resourceGroups/$script:RgName/providers/Microsoft.ContainerService/managedClusters/aks$script:ShortName"; Name = "aks$script:ShortName"; Pools = @(@{ Name = 'systempool'; VmSize = 'standard_d2as_v7'; Count = 2; MaxCount = 8 }, @{ Name = 'userpool1'; VmSize = 'standard_d2as_v7'; Count = 2; MaxCount = 8 }) })
@@ -1061,7 +1061,7 @@ BeforeAll {
         $script:ArmReads += $Path
         $q = $script:Tenant.Quota
         $body = $null
-        if ($Path -match 'Microsoft\.Quota/quotas') { $body = @{ value = @(@{ name = 'Y1'; properties = @{ name = @{ value = 'Y1'; localizedValue = 'Y1 VMs' }; limit = @{ value = $q.Y1 } } }) } }
+        if ($Path -match 'Microsoft\.Web/geoRegions\?') { $body = @{ value = @($q.FlexRegions | ForEach-Object { @{ name = $_; properties = @{ name = $_; displayName = $_ } } }) } }
         elseif ($Path -match "resourceType eq 'Microsoft\.ContainerService/managedClusters'") { $body = @{ value = @($q.Clusters | ForEach-Object { @{ id = $_.Id; name = $_.Name } }) } }
         elseif ($Path -match '/agentPools\?') { $cluster = @($q.Clusters | Where-Object { $Path -like "$($_.Id)/*" })[0]; $body = @{ value = @($cluster.Pools | ForEach-Object { @{ name = $_.Name; properties = @{ vmSize = $_.VmSize; count = $_.Count; maxCount = $_.MaxCount } } }) } }
         elseif ($Path -match 'Microsoft\.Compute/locations/[^/]+/usages') { $body = @{ value = @($q.ComputeUsage | ForEach-Object { @{ name = @{ value = $_.Name; localizedValue = $_.Name }; currentValue = $_.Current; limit = $_.Limit } }) } }
@@ -3680,18 +3680,19 @@ Context 'Log file and summary file on every exit (project#3170)' {
 }
 
 Context 'Step 5a: the Azure quotas that the migration needs' {
-    It 'reports the Y1 quota, the vCPU room and no model to move when everything is in place' {
+    It 'reports the Flex Consumption plan, the vCPU room and no model to move when everything is in place' {
         Add-CompliantPreWindowState
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Quota: App Service Y1 instances' | Should -Be 'Present: 1 in uksouth'
+        Get-SummaryResult 'Region: Flex Consumption plan' | Should -Be 'Present: uksouth'
         # Each pool may add 6 nodes plus 1 for the upgrade: (6 + 1) * 2 vCPUs * 2 pools = 28.
         Get-SummaryResult 'Quota: vCPUs of StandardDasv7Family' | Should -Be 'Present: 18 of 350 used in uksouth. The cluster may need 28 more'
         Get-SummaryResult 'Quota: vCPUs of the region' | Should -Be 'Present: 18 of 50 used in uksouth. The cluster may need 28 more'
         Get-SummaryResult 'Model deployments on Foundry' | Should -Match '^Present: gpt-5.4-mini \(GlobalStandard 1000\), text-embedding-3-large \(Standard 150\)$'
         Get-SummaryResult 'Model deployments to move to Foundry' | Should -Be 'None'
-        # Reads only: the quota, the cluster, its pools, the compute usage, the sizes, the accounts, their deployments.
-        @($script:ArmReads | Where-Object { $_ -match 'Microsoft\.Quota/quotas' }) | Should -HaveCount 1
+        # Reads only: the Flex Consumption regions, the cluster, its pools, the compute usage, the sizes, the accounts, their deployments.
+        @($script:ArmReads | Where-Object { $_ -match 'Microsoft\.Web/geoRegions\?' }) | Should -HaveCount 1
+        @($script:ArmReads | Where-Object { $_ -match 'Microsoft\.Quota/quotas' }) | Should -HaveCount 0
         @($script:ArmReads | Where-Object { $_ -match '/agentPools\?' }) | Should -HaveCount 1
         Should -Invoke Invoke-AzRestMethod -Times 0 -ParameterFilter { $Method -ne 'GET' }
         ($script:Console -join "`n") | Should -Match 'The Azure quotas that the migration needs'
@@ -3699,13 +3700,13 @@ Context 'Step 5a: the Azure quotas that the migration needs' {
         ($script:Console -join "`n") | Should -Not -Match 'Step \d+[a-z]? of \d+'
     }
 
-    It 'reports SHORT and needs attention when the subscription has no Y1 instance' {
+    It 'reports SHORT and needs attention when the region has no Flex Consumption plan' {
         Add-CompliantPreWindowState
-        $script:Tenant.Quota.Y1 = 0
+        $script:Tenant.Quota.FlexRegions = @('Sweden Central')
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Quota: App Service Y1 instances' | Should -Match '^SHORT: 0 in uksouth\. The start and stop schedule of the cluster runs as a Function App and needs one Y1 instance'
-        ($script:Console -join "`n") | Should -Match 'Quota: App Service Y1 instances: 0 in uksouth\. The start and stop schedule of the cluster needs one'
+        Get-SummaryResult 'Region: Flex Consumption plan' | Should -Be 'SHORT: uksouth has no Flex Consumption plan. The start and stop schedule of the cluster runs as a Function App on that plan. Tell Neologik to run the cluster without the schedule'
+        ($script:Console -join "`n") | Should -Match 'Region: Flex Consumption plan: not available in uksouth\. The start and stop schedule of the cluster needs the plan'
     }
 
     It 'reports SHORT when the cluster growth does not fit the regional vCPU quota' {
@@ -3730,10 +3731,10 @@ Context 'Step 5a: the Azure quotas that the migration needs' {
 
     It 'reports Review and continues when Azure refuses a quota read' {
         Add-CompliantPreWindowState
-        Mock Invoke-AzRestMethod { param($Method, $Path) if ($Path -match "userAssignedIdentities/$script:SqlIdentityName") { return [pscustomobject]@{ StatusCode = 200; Content = (@{ properties = $script:Tenant.SqlIdentity } | ConvertTo-Json -Depth 5) } }; if ($Path -match 'userAssignedIdentities') { return [pscustomobject]@{ StatusCode = 200; Content = (@{ properties = $script:Tenant.DirectoryIdentity } | ConvertTo-Json -Depth 5) } }; if ($Path -match 'Microsoft\.Quota/quotas') { return [pscustomobject]@{ StatusCode = 403; Content = '{"error":{"code":"AuthorizationFailed","message":"The client does not have authorization"}}' } }; if ($Path -match '/providers/Microsoft\.Features/') { return [pscustomobject]@{ StatusCode = 200; Content = '{"properties":{"state":"Registered"}}' } }; if ($Path -match '^/subscriptions/[^/]+/providers/[^/?]+\?api-version=') { return [pscustomobject]@{ StatusCode = 200; Content = '{"registrationState":"Registered"}' } }; if ($Path -match 'Microsoft\.KeyVault/vaults/') { return [pscustomobject]@{ StatusCode = 200; Content = '{"properties":{"enableRbacAuthorization":true}}' } }; [pscustomobject]@{ StatusCode = 200; Content = '{"value":[]}' } }
+        Mock Invoke-AzRestMethod { param($Method, $Path) if ($Path -match "userAssignedIdentities/$script:SqlIdentityName") { return [pscustomobject]@{ StatusCode = 200; Content = (@{ properties = $script:Tenant.SqlIdentity } | ConvertTo-Json -Depth 5) } }; if ($Path -match 'userAssignedIdentities') { return [pscustomobject]@{ StatusCode = 200; Content = (@{ properties = $script:Tenant.DirectoryIdentity } | ConvertTo-Json -Depth 5) } }; if ($Path -match 'Microsoft\.Web/geoRegions\?') { return [pscustomobject]@{ StatusCode = 403; Content = '{"error":{"code":"AuthorizationFailed","message":"The client does not have authorization"}}' } }; if ($Path -match '/providers/Microsoft\.Features/') { return [pscustomobject]@{ StatusCode = 200; Content = '{"properties":{"state":"Registered"}}' } }; if ($Path -match '^/subscriptions/[^/]+/providers/[^/?]+\?api-version=') { return [pscustomobject]@{ StatusCode = 200; Content = '{"registrationState":"Registered"}' } }; if ($Path -match 'Microsoft\.KeyVault/vaults/') { return [pscustomobject]@{ StatusCode = 200; Content = '{"properties":{"enableRbacAuthorization":true}}' } }; [pscustomobject]@{ StatusCode = 200; Content = '{"value":[]}' } }
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Quota: App Service Y1 instances' | Should -Match '^Review: the quota could not be read\. .*HTTP 403\. The client does not have authorization'
+        Get-SummaryResult 'Region: Flex Consumption plan' | Should -Match '^Review: the regions could not be read\. .*HTTP 403\. The client does not have authorization'
         Get-SummaryResult 'Quota: vCPUs' | Should -Be 'Review: the resource group holds no Kubernetes cluster'
         Get-SummaryResult 'Model deployments on Foundry' | Should -Match '^Review: the resource group holds no Foundry account'
     }
