@@ -777,7 +777,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.10'
+$script:ScriptVersion = '1.1.11'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -2217,7 +2217,7 @@ function Set-NeologikAgentBlueprint {
     $graph = $script:GraphV1
     $graphBeta = $script:GraphBeta
 
-    Write-Log 'Step 1a of 5: the agent identity blueprint' -Level Info
+    Write-Log 'The agent identity blueprint' -Level Info
     # The short name comes from the configuration file or from -SolutionShortName. The
     # script never reads the short name from a display name. The name of the agent
     # identity blueprint is 'Neologik Agent Blueprint - <key> - <short name>'.
@@ -2463,7 +2463,7 @@ function Set-NeologikAgentBlueprint {
             Add-Summary 'Agent identity blueprint service principal owner' "FAILED: $reason"
         }
 
-        Write-Log 'Step 1b of 5: the permission of the service principal of the agent identity blueprint' -Level Info
+        Write-Log 'The permission of the service principal of the agent identity blueprint' -Level Info
         $null = Grant-NeologikGraphAppRole -PrincipalId $principalId -Label 'Agent identity blueprint service principal' -RoleNames $script:BlueprintPrincipalGraphRoles
     }
     elseif (-not $principalPending) {
@@ -2471,7 +2471,7 @@ function Set-NeologikAgentBlueprint {
         Add-Summary 'Agent identity blueprint service principal permission' 'SKIPPED: the service principal of the agent identity blueprint is not available'
     }
 
-    Write-Log 'Step 1c of 5: the federated credentials of the agent identity blueprint' -Level Info
+    Write-Log 'The federated credentials of the agent identity blueprint' -Level Info
     $existingNames = $null
     try {
         $existingCreds = @(Get-NeologikGraphCollection -Uri "$graphBeta/applications/$blueprintObjectId/federatedIdentityCredentials?`$select=name" -RetryNotFound:$created)
@@ -2528,13 +2528,13 @@ function Set-NeologikDeploymentGraphRole {
     function grants a permission that is absent and removes nothing. The function
     records in the state whether the deployment identity holds both.
     #>
-    param([string]$StepLabel = 'Step 1d of 5: the Microsoft Graph application permissions of the deployment identity')
+    param([string]$StepLabel = 'The Microsoft Graph application permissions of the deployment identity')
     $state = $script:State
     $deploySp = $state.DeploySp
     Write-Log $StepLabel -Level Info
     $outcome = Grant-NeologikGraphAppRole -PrincipalId $deploySp.Id -Label 'Deployment identity' -RoleNames $script:RequiredGraphRoles
     $state.DeploymentGraphRolesComplete = [bool]$outcome.Complete
-    Write-Log "$(($StepLabel -split ':')[0]) is complete. Permissions that the script granted: $($outcome.Granted)" -Level Info
+    Write-Log "Microsoft Graph application permissions that the script granted to the deployment identity: $($outcome.Granted)" -Level Info
 }
 
 function Remove-NeologikRetiredGraphRole {
@@ -2547,7 +2547,7 @@ function Remove-NeologikRetiredGraphRole {
     $state = $script:State
     $deploySp = $state.DeploySp
     $graphSp = $state.GraphSp
-    Set-NeologikDeploymentGraphRole -StepLabel 'Step 6a of 6: the Microsoft Graph application permissions of the deployment identity'
+    Set-NeologikDeploymentGraphRole
     if (-not $state.DeploymentGraphRolesComplete) {
         Write-Log '  The deployment identity does not hold both permissions that the deployment identity keeps. The script removes no permission' -Level Warning
         foreach ($roleName in $script:RetiredGraphRoles) {
@@ -2653,7 +2653,7 @@ function Set-NeologikSecurityGroup {
     and fills the memberships. The step changes no group that already matches.
     #>
     $state = $script:State
-    Write-Log 'Step 2 of 5: the security groups of the environment, the Neologik guest users and the memberships' -Level Info
+    Write-Log 'The security groups of the environment, the Neologik guest users and the memberships' -Level Info
     $graph = $script:GraphV1
     $suffix = " - $($state.ShortName)"
     $definitions = @(
@@ -2936,7 +2936,7 @@ function Set-NeologikSignInGroupAssignment {
     # Engine to the Platform Sign-in application, and the check of the administrator
     # consent.
     $state = $script:State
-    Write-Log 'Step 3 of 5: the assignment of the role groups of the Neologik Context Engine to the Platform Sign-in application' -Level Info
+    Write-Log 'The assignment of the role groups of the Neologik Context Engine to the Platform Sign-in application' -Level Info
     $adminsGroupId = [string](Get-NeologikProperty $state 'NceAdminsGroupId' '')
     if (-not $state.SignInAppClientId -or -not $state.NceUserGroupId) {
         Write-Log '  SKIPPED. The command gives no SignInAppClientId or no NceUserGroupId. The command from Neologik holds both values' -Level Warning
@@ -3022,7 +3022,7 @@ function Set-NeologikSignInGroupAssignment {
     }
 
     # ----- Step 4: administrator consent ----------------------------------
-    Write-Log 'Step 4 of 5: the administrator consent of the Platform Sign-in application' -Level Info
+    Write-Log 'The administrator consent of the Platform Sign-in application' -Level Info
     try {
         $grants = @(Get-MgServicePrincipalOauth2PermissionGrant -ServicePrincipalId $signInSp.Id -All -ErrorAction Stop |
             Where-Object { $_.ConsentType -eq 'AllPrincipals' })
@@ -3204,7 +3204,7 @@ function Test-NeologikPreWindowSharePointConsent {
     ingestion.
     #>
     $state = $script:State
-    Write-Log 'Step 4a of 5: the consent of the SharePoint application for Sites.Selected' -Level Info
+    Write-Log 'The consent of the SharePoint application for Sites.Selected' -Level Info
     if (-not $state.Config -or -not (Test-NeologikProperty $state.Config 'SharePointIngestion')) {
         Write-Log '  No file records whether the solution uses SharePoint ingestion. The script reads the SharePoint permissions in the directory' -Level Info
         Test-NeologikSharePointConsent
@@ -3231,7 +3231,7 @@ function Set-NeologikPlatformAppOwnership {
     $state = $script:State
     $deploySp = $state.DeploySp
     $graph = $script:GraphV1
-    Write-Log 'Step 4b of 5: the ownership of the application registrations by the deployment identity' -Level Info
+    Write-Log 'The ownership of the application registrations by the deployment identity' -Level Info
     $shortName = $state.ShortName
     if (-not $shortName) {
         Write-Log '  The command gives no SolutionShortName. The script cannot find the application registrations' -Level Warning
@@ -3964,8 +3964,10 @@ function Remove-NeologikAdminGroupMembership {
         return
     }
     try {
-        $isMember = @(Get-MgGroupMember -GroupId $state.AdminGroupId -All -ErrorAction Stop |
-            Where-Object { $_.Id -eq $deploySp.Id }).Count -gt 0
+        # The function reads the membership from the deployment identity's own list of
+        # groups. The member list of a group can leave out a service principal.
+        $isMember = @(Get-MgServicePrincipalMemberOf -ServicePrincipalId $deploySp.Id -All -ErrorAction Stop |
+            Where-Object { $_.Id -eq $state.AdminGroupId }).Count -gt 0
         if (-not $isMember) {
             Write-Log '  The membership of the Admin User Group: not held. The script removes nothing' -Level Success
             Add-Summary $label 'Not held'
@@ -4547,11 +4549,10 @@ function Set-NeologikKitStandardItem {
     storage account. The function needs the Azure session. Returns $true when every item
     is in place.
     #>
-    param([Parameter(Mandatory)][string]$StepPrefix)
-    $sql = Set-NeologikSqlIdentityDirectoryRole -StepLabel "$StepPrefix the SQL managed identity"
-    $providers = Set-NeologikResourceProvider -StepLabel "$StepPrefix the resource providers and preview features"
-    $vault = Set-NeologikKeyVaultAccessModel -StepLabel "$StepPrefix the Key Vault"
-    $storage = Set-NeologikDeploymentStorageAccount -StepLabel "$StepPrefix the deployment storage account"
+    $sql = Set-NeologikSqlIdentityDirectoryRole -StepLabel 'The SQL managed identity'
+    $providers = Set-NeologikResourceProvider -StepLabel 'The resource providers and preview features'
+    $vault = Set-NeologikKeyVaultAccessModel -StepLabel 'The Key Vault'
+    $storage = Set-NeologikDeploymentStorageAccount -StepLabel 'The deployment storage account'
     return ($sql -and $providers -and $vault -and $storage)
 }
 
@@ -4907,7 +4908,7 @@ function Set-NeologikAdminGroupRole {
         Add-Summary 'Admin User Group roles' 'Not checked: the command does not name the Admin User Group'
         return $true
     }
-    Write-Log 'Step 6 of 6: the Azure roles of the Admin User Group' -Level Info
+    Write-Log 'The Azure roles of the Admin User Group' -Level Info
     $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
     $subScope = "/subscriptions/$($state.SubscriptionId)"
     $held = $true
@@ -4976,7 +4977,7 @@ function Invoke-NeologikPermissionReduction {
     a failed pre migration script or a failed deployment with that access.
     #>
     $state = $script:State
-    $held = Set-NeologikDeploymentAzureRole -StepLabel 'Step 6 of 6: the permission reduction of the deployment identity' -ApplyLimit
+    $held = Set-NeologikDeploymentAzureRole -StepLabel 'The permission reduction of the deployment identity' -ApplyLimit
     $reductionItems = @()
     foreach ($roleName in $script:LegacySubRoles) { $reductionItems += "Subscription role to remove: $roleName" }
     if ($state.ScriptRunnerObjectId) { $reductionItems += Get-NeologikScriptRunnerItem }
@@ -4990,11 +4991,11 @@ function Invoke-NeologikPermissionReduction {
     }
     # The two items that the Neologik Platform needs from version 5.2. Neither item
     # changes the access of the deployment identity.
-    $credentialReady = Set-NeologikDeploymentCredential -StepLabel 'Step 6 of 6: the federated credential of the deployment identity'
-    $identityReady = Set-NeologikDirectoryIdentity -StepLabel 'Step 6 of 6: the directory managed identity'
+    $credentialReady = Set-NeologikDeploymentCredential -StepLabel 'The federated credential of the deployment identity'
+    $identityReady = Set-NeologikDirectoryIdentity -StepLabel 'The directory managed identity'
     # The items of the onboarding kit that both runs confirm. None of them changes the
     # access of the deployment identity.
-    $kitItemsReady = Set-NeologikKitStandardItem -StepPrefix 'Step 6 of 6:'
+    $kitItemsReady = Set-NeologikKitStandardItem
     if (-not $held) {
         Write-Log '  The deployment identity does not hold all ten Azure roles. The script removes no access' -Level Warning
         foreach ($item in $reductionItems) { Add-Summary $item 'SKIPPED: the deployment identity does not hold all ten Azure roles' }
@@ -5443,7 +5444,7 @@ function Test-NeologikAzureQuota {
         deployed on the Foundry account first, within the regional quota of the model.
     A read that Azure refuses reports Review with the reason and does not stop the run.
     #>
-    Write-Log 'Step 5a of 5: the Azure quotas that the migration needs' -Level Info
+    Write-Log 'The Azure quotas that the migration needs' -Level Info
     $state = $script:State
     $location = ''
     try { $location = [string](Get-NeologikProperty (Get-AzResourceGroup -Name $state.ResourceGroupName -ErrorAction Stop) 'Location' '') }
@@ -5642,16 +5643,16 @@ function Invoke-NeologikPreWindowRun {
     Set-NeologikSignInGroupAssignment
     Test-NeologikPreWindowSharePointConsent
     Set-NeologikPlatformAppOwnership
-    $credentialReady = Set-NeologikDeploymentCredential -StepLabel 'Step 4c of 5: the federated credential of the deployment identity'
-    $held = Set-NeologikDeploymentAzureRole -StepLabel 'Step 5 of 5: the Azure roles of the deployment identity'
+    $credentialReady = Set-NeologikDeploymentCredential -StepLabel 'The federated credential of the deployment identity'
+    $held = Set-NeologikDeploymentAzureRole -StepLabel 'The Azure roles of the deployment identity'
     $identityReady = $false
     $kitItemsReady = $false
     if ($state.AzureConnected) {
-        $identityReady = Set-NeologikDirectoryIdentity -StepLabel 'Step 5b of 5: the directory managed identity'
+        $identityReady = Set-NeologikDirectoryIdentity -StepLabel 'The directory managed identity'
         # The items of the onboarding kit that both runs confirm: the directory role of the
         # SQL managed identity, the resource providers and preview features, the Key Vault
         # access model and the deployment storage account.
-        $kitItemsReady = Set-NeologikKitStandardItem -StepPrefix 'Step 5c of 5:'
+        $kitItemsReady = Set-NeologikKitStandardItem
     }
     else {
         Add-Summary 'Directory managed identity' 'SKIPPED: the sign-in to Azure failed'
