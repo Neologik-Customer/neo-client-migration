@@ -40,6 +40,7 @@ This document has two readers.
 |---|---|
 | `Migrate-NeologikEnvironment.ps1` | The migration script. A Global Administrator runs the migration script twice: the pre migration script before the migration, the post migration script after Neologik has proven the environment |
 | `NeologikGuestUsers.txt` | The list of Neologik support accounts. The pre migration script confirms that each account is a guest of your tenant |
+| `resource-providers.txt` | The Azure resource providers and preview features that the Neologik Platform requires. Both runs confirm that each entry is registered on your subscription |
 | [README.md](README.md) | This document. The place to start |
 | [docs/MIGRATION-SCRIPT-GUIDE.md](docs/MIGRATION-SCRIPT-GUIDE.md) | What the migration script checks and changes, run by run |
 | [docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md](docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md) | For Approvers. Each sign-in, each permission, each write and each file |
@@ -77,7 +78,7 @@ A Private Endpoint environment, whose entry point is Application Gateway for Con
 
 ## Run the migration script
 
-1. Extract the migration package to a folder, for example `C:\Neologik`. A zip downloaded from GitHub extracts to a folder inside the folder you choose, named `neo-client-migration-main`. The script is in that inner folder. Keep the files together: the pre migration script reads `NeologikGuestUsers.txt` from the folder of the migration script.
+1. Extract the migration package to a folder, for example `C:\Neologik`. A zip downloaded from GitHub extracts to a folder inside the folder you choose, named `neo-client-migration-main`. The script is in that inner folder. Keep the files together: the migration script reads `NeologikGuestUsers.txt` and `resource-providers.txt` from the folder of the migration script.
 2. Open PowerShell 7 and go to the folder that holds the script, for example `cd C:\Neologik\neo-client-migration-main`.
 3. Allow the script to run in this session:
 
