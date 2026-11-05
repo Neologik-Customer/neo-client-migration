@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.11](#version-1111)
 2. [Version 1.1.10](#version-1110)
 2. [Version 1.1.9](#version-119)
 2. [Version 1.1.8](#version-118)
@@ -34,7 +35,18 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.10 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.11 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.11
+
+**Date**: 2026-11-05
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| The post migration script, step 6d | The migration script reads the membership of the deployment identity in the Admin User Group from the deployment identity's own list of groups. The member list of the group can leave out the deployment identity. Before this version the post migration script read that member list, reported the membership as not held and kept the membership |
+| Both runs, the screen and the log file | The migration script prints the title of each step without a step number, for example "The directory managed identity". Before this version the post migration script printed "Step 6 of 6" before each of eight parts |
 
 ## Version 1.1.10
 
