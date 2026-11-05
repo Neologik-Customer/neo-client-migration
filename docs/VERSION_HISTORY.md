@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.12](#version-1112)
 2. [Version 1.1.11](#version-1111)
 2. [Version 1.1.10](#version-1110)
 2. [Version 1.1.9](#version-119)
@@ -35,7 +36,17 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.11 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.12 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.12
+
+**Date**: 2026-11-05
+
+This version applies to an environment on Neologik Platform version 5.1.
+
+| Item | Change |
+|---|---|
+| The pre migration script, step 5a | The migration script checks that the region of the environment has the Azure Functions Flex Consumption plan. The schedule that starts and stops the cluster runs on that plan. The quota of the plan is a separate pool that every subscription holds, so you request no quota. Before this version the step read the App Service Y1 quota and asked for a quota request when the quota was 0 |
 
 ## Version 1.1.11
 
