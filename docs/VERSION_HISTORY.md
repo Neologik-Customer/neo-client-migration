@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.10](#version-1110)
 2. [Version 1.1.9](#version-119)
 2. [Version 1.1.8](#version-118)
 2. [Version 1.1.7](#version-117)
@@ -33,7 +34,22 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.9 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.10 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.10
+
+**Date**: 2026-11-05
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1. After the post migration script of this version, your environment stands where an environment onboarded with the current onboarding kit stands.
+
+| Item | Change |
+|---|---|
+| Both runs, step 5c | The migration script confirms four items of the onboarding kit and adds what is absent: the directory role Directory Readers of the SQL managed identity, the registration of every resource provider and preview feature in `resource-providers.txt`, Azure role-based access control on the Key Vault, and the settings and containers of the deployment storage account. The command gains `-SqlIdentityName` and `-KeyVaultName`, both required. The migration package carries `resource-providers.txt` beside the migration script |
+| The post migration script, step 6j | The migration script brings the Admin User Group to the thirteen roles of the onboarding kit on the resource group, then removes every other role of the group in the subscription. The migration script assigns a missing role first and removes nothing until the group holds all thirteen. A role of the group outside the subscription is listed and kept |
+| The post migration script, step 6i | The migration script confirms Key Vault Secrets Officer beside Reader for the script runner identity before the removal of the two Contributor roles |
+| The tag `NeologikOnboardingKit` | The tag waits for the items of step 5c and, in the post migration script, for the roles of the Admin User Group |
+| The sign-in | Both runs request the delegated permission `RoleManagement.ReadWrite.Directory`, for the directory role of the SQL managed identity. Before this version the post migration script alone requested the permission |
+| The snapshot file | The section `deploymentIdentity.memberOf` records the group memberships and directory roles of the deployment identity. Before this version the section recorded an error |
 
 ## Version 1.1.9
 

@@ -164,7 +164,24 @@
       does that work from inside your environment. Nothing can sign in as the managed
       identity until a deployment by Neologik adds the sign-in credential.
 
-      When the deployment identity holds all ten roles and steps 4c and 5b are
+    Step 5c. The items of the onboarding kit that both runs confirm.
+      After the post migration script the environment stands where an environment
+      onboarded with the current onboarding kit stands. Both runs confirm these
+      items and add what is absent:
+        - The SQL managed identity, which -SqlIdentityName names, holds the
+          directory role Directory Readers. The SQL server uses the managed
+          identity to look up Microsoft Entra accounts and groups at sign-in.
+        - Every resource provider and preview feature in resource-providers.txt,
+          the list of the onboarding kit that the migration package carries, is
+          registered on the subscription. The script submits each registration
+          that is absent and waits for the whole list together.
+        - The Key Vault, which -KeyVaultName names, uses Azure role-based access
+          control.
+        - The deployment storage account, named 'stneodeploy...', accepts
+          Microsoft Entra authentication only, allows no public blob access,
+          requires TLS 1.2 and holds the containers certificate, json and logs.
+
+      When the deployment identity holds all ten roles and steps 4c, 5b and 5c are
       complete, the script records the version of the onboarding kit that -KitVersion
       names on the resource group, in the tag NeologikOnboardingKit.
 
@@ -199,13 +216,23 @@
         - Every other directory role and every other group membership.
         - Contributor on the subscription and on the resource group from the
           script runner identity, the managed identity that the deployment runs
-          its scripts with, after the script has confirmed Reader on the
-          resource group for that identity. The command names the identity with
-          -ScriptRunnerObjectId. Without the parameter the script leaves the
-          roles of that identity.
+          its scripts with, after the script has confirmed Reader and Key Vault
+          Secrets Officer on the resource group for that identity. The command
+          names the identity with -ScriptRunnerObjectId. Without the parameter
+          the script leaves the roles of that identity.
 
-      Last, when steps 4c and 5b are complete, the script records the version of
-      the onboarding kit on the resource group, in the tag NeologikOnboardingKit.
+      The script then confirms the Azure roles of the Admin User Group, which
+      -AdminGroupId names. The onboarding kit gives the group thirteen roles on
+      the resource group and no role on the subscription. The script assigns each
+      of the thirteen roles that is absent. When the group holds all thirteen, the
+      script removes every other role that the group holds in the subscription. A
+      role of the group outside the subscription is listed and kept.
+
+      The script also confirms the items of step 5c, and adds what is absent.
+
+      Last, when steps 4c, 5b and 5c and the roles of the Admin User Group are
+      complete, the script records the version of the onboarding kit on the
+      resource group, in the tag NeologikOnboardingKit.
 
     PERMISSIONS THAT THE SIGN-IN REQUESTS
 
@@ -221,11 +248,11 @@
       Every run             AgentIdentityBlueprint.Create
       Every run             AgentIdentityBlueprint.AddRemoveCreds.All
       Every run             AgentIdentityBlueprintPrincipal.Create
+      Every run             RoleManagement.ReadWrite.Directory
       The pre migration script         GroupMember.ReadWrite.All
       The pre migration script         Group.ReadWrite.All
       The pre migration script         User.Invite.All
       The pre migration script         AgentIdentityBlueprintPrincipal.ReadWrite.All
-      A run with -LaterRun  RoleManagement.ReadWrite.Directory
       A run with -LaterRun  GroupMember.ReadWrite.All
 
     OUTPUT
@@ -314,6 +341,17 @@
     federated credential of the deployment identity accepts only a deployment run
     that names this environment. Required. The command from Neologik gives the value.
 
+.PARAMETER SqlIdentityName
+    The name of the SQL managed identity, for example
+    neologik-sql-managed-identity-abcprd01. The script confirms that the managed
+    identity holds the directory role Directory Readers. Required. The command from
+    Neologik gives the value.
+
+.PARAMETER KeyVaultName
+    The name of the Key Vault of the environment. The script confirms that the Key
+    Vault uses Azure role-based access control. Required. The command from Neologik
+    gives the value.
+
 .PARAMETER UserGroupId
     The object id of the security group 'Neologik User Group - <short name>',
     whose members use the Neologik agents. The command from Neologik gives the
@@ -336,7 +374,8 @@
 .PARAMETER AdminGroupId
     The object id of the Neologik Admin User Group. Without the parameter, and
     without a configuration file that names the group, the pre migration script does not check
-    the membership of the Admin User Group. The summary then reads 'Not checked'.
+    the membership of the Admin User Group, and the post migration script leaves the
+    Azure roles of the group. The summary then reads 'Not checked'.
 
 .PARAMETER LaterRun
     Selects the post migration script. The post migration script reduces the access of the deployment
@@ -346,9 +385,9 @@
 .PARAMETER ScriptRunnerObjectId
     The object id of the script runner identity, the managed identity named
     'neologik-script-runner-service-connection-<short name>', which the
-    deployment runs its scripts with. The post migration script gives that identity Reader
-    on the resource group, then removes Contributor on the subscription and on
-    the resource group from that identity. The command from Neologik gives the
+    deployment runs its scripts with. The post migration script confirms Reader and Key
+    Vault Secrets Officer on the resource group for that identity, then removes
+    Contributor on the subscription and on the resource group from that identity. The command from Neologik gives the
     value. Without the parameter the post migration script leaves the roles of that identity.
 
 .PARAMETER UploadStorageAccountName
@@ -473,6 +512,12 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$EnvironmentName,
+
+    [Parameter(Mandatory = $false)]
+    [string]$SqlIdentityName,
+
+    [Parameter(Mandatory = $false)]
+    [string]$KeyVaultName,
 
     [Parameter(Mandatory = $false)]
     [string]$UserGroupId,
@@ -608,12 +653,48 @@ $script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/
 $script:LegacySubRoles = @('Contributor', 'User Access Administrator')
 
 # The script runner identity: the managed identity that the deployment runs its
-# scripts with. The identity needs Reader on the resource group beside the roles the
-# onboarding gave it there. An onboarding before kit version 5.0.3 gave the identity
-# Contributor on the subscription and on the resource group instead. Step 6i gives the
-# identity Reader on the resource group, then removes the two Contributor roles.
-$script:ScriptRunnerRequiredRgRoles = @('Reader')
+# scripts with. The identity holds Reader and Key Vault Secrets Officer on the resource
+# group, as the onboarding kit gives a new environment. An onboarding before kit version
+# 5.0.3 gave the identity Contributor on the subscription and on the resource group
+# instead. Step 6i confirms the two roles, then removes the two Contributor roles.
+$script:ScriptRunnerRequiredRgRoles = @('Reader', 'Key Vault Secrets Officer')
 $script:ScriptRunnerLegacyRole = 'Contributor'
+
+# The thirteen roles of the Admin User Group on the resource group. The onboarding kit
+# assigns the same thirteen roles and no role on the subscription. Step 6j of the post
+# migration script brings the group to that set.
+$script:AdminGroupRequiredRgRoles = @(
+    'Contributor',
+    'Azure Kubernetes Service Cluster Admin Role',
+    'Azure Kubernetes Service RBAC Cluster Admin',
+    'Key Vault Administrator',
+    'Key Vault Secrets Officer',
+    'Key Vault Certificates Officer',
+    'Storage Blob Data Owner',
+    'Storage Blob Data Contributor',
+    'Storage Table Data Contributor',
+    'Cognitive Services Data Reader',
+    'Cognitive Services OpenAI Contributor',
+    'Search Index Data Reader',
+    'Azure AI Developer'
+)
+
+# The directory role of the SQL managed identity. The SQL server uses the managed identity
+# to look up Microsoft Entra accounts and groups at sign-in. The onboarding kit assigns the
+# same role.
+$script:SqlIdentityDirectoryRoleName = 'Directory Readers'
+$script:SqlIdentityDirectoryRoleTemplateId = '88d8e3e3-8f55-4a1e-953a-9b9898b8876b'
+
+# The containers of the deployment storage account that the onboarding kit creates.
+$script:DeploymentStorageContainers = @('certificate', 'json', 'logs')
+$script:ResourceProviderApiVersion = '2021-04-01'
+$script:FeatureApiVersion = '2021-07-01'
+$script:KeyVaultApiVersion = '2023-07-01'
+$script:StorageApiVersion = '2023-05-01'
+# Azure takes some minutes to register a resource provider. The script waits for the whole
+# list together: ProviderRegistrationPolls reads, ProviderPollSeconds apart.
+$script:ProviderRegistrationPolls = 40
+$script:ProviderPollSeconds = 15
 
 # The deployment identity is not a member of the Admin User Group. The deployment
 # identity reaches SQL as the Microsoft Entra administrator of the SQL server. The
@@ -696,7 +777,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.9'
+$script:ScriptVersion = '1.1.10'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -807,7 +888,10 @@ function Get-NeologikProperty {
     param($Object, [string]$Name, $Default = $null)
     if ($null -eq $Object) { return $Default }
     if ($Object -is [System.Collections.IDictionary]) {
-        if ($Object.Contains($Name)) { return $Object[$Name] }
+        # A generic dictionary, such as AdditionalProperties of a Microsoft Graph PowerShell
+        # object, implements IDictionary.Contains through the interface only. The cast binds
+        # that implementation for every dictionary type.
+        if (([System.Collections.IDictionary]$Object).Contains($Name)) { return $Object[$Name] }
         return $Default
     }
     $property = $Object.PSObject.Properties[$Name]
@@ -820,7 +904,7 @@ function Test-NeologikProperty {
     # value. Get-NeologikProperty cannot tell an empty array from an absent property.
     param($Object, [string]$Name)
     if ($null -eq $Object) { return $false }
-    if ($Object -is [System.Collections.IDictionary]) { return [bool]$Object.Contains($Name) }
+    if ($Object -is [System.Collections.IDictionary]) { return [bool](([System.Collections.IDictionary]$Object).Contains($Name)) }
     return ($null -ne $Object.PSObject.Properties[$Name])
 }
 
@@ -1580,7 +1664,8 @@ function Resolve-NeologikInput {
     param([hashtable]$Parameters)
     $state = $script:State
     foreach ($name in @('KitVersion', 'ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SolutionShortName', 'SolutionName', 'SignInAppClientId', 'SharePointAppClientId',
-            'UserGroupId', 'NceUserGroupId', 'AdminGroupId', 'GuestUsersFile', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'ScriptRunnerObjectId', 'DirectoryIdentityName', 'EnvironmentName')) {
+            'UserGroupId', 'NceUserGroupId', 'AdminGroupId', 'GuestUsersFile', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'ScriptRunnerObjectId', 'DirectoryIdentityName', 'EnvironmentName',
+            'SqlIdentityName', 'KeyVaultName')) {
         $state[$name] = ([string](Get-NeologikProperty $Parameters $name '')).Trim()
     }
     # Agent registrations: one client id for each agent registration. One element can
@@ -1699,6 +1784,19 @@ function Resolve-NeologikInput {
     if ($state.EnvironmentName -notmatch '^[a-z0-9]{2,32}$') {
         throw [System.ArgumentException]::new("EnvironmentName must be 2 to 32 lower-case letters and digits. The value is '$($state.EnvironmentName)'.")
     }
+    # The two values of the kit standard. The command from Neologik gives each value.
+    if (-not $state.SqlIdentityName) {
+        throw [System.ArgumentException]::new('The command does not give SqlIdentityName. SqlIdentityName is the name of the SQL managed identity. Ask Neologik for the current command.')
+    }
+    if ($state.SqlIdentityName -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$') {
+        throw [System.ArgumentException]::new("SqlIdentityName must be the name of a managed identity: 3 to 128 letters, digits, hyphens and underscores, starting with a letter or a digit. The value is '$($state.SqlIdentityName)'.")
+    }
+    if (-not $state.KeyVaultName) {
+        throw [System.ArgumentException]::new('The command does not give KeyVaultName. KeyVaultName is the name of the Key Vault of the environment. Ask Neologik for the current command.')
+    }
+    if ($state.KeyVaultName -notmatch '^[A-Za-z][A-Za-z0-9-]{1,22}[A-Za-z0-9]$') {
+        throw [System.ArgumentException]::new("KeyVaultName must be the name of a Key Vault: 3 to 24 letters, digits and hyphens, starting with a letter. The value is '$($state.KeyVaultName)'.")
+    }
     $idChecks = @(
         @{ Name = 'TenantId'; Value = $state.TenantId },
         @{ Name = 'DeploySpClientId'; Value = $state.DeploySpClientId },
@@ -1774,6 +1872,8 @@ function Write-NeologikHeader {
     if ($state.NceUserGroupId) { $lines += "  User group of the Neologik Context Engine:  $($state.NceUserGroupId)" }
     if ($state.AdminGroupId) { $lines += "  Admin User Group:                           $($state.AdminGroupId)" }
     if ($state.ScriptRunnerObjectId) { $lines += "  Script runner identity:                     $($state.ScriptRunnerObjectId)" }
+    $lines += "  SQL managed identity:                       $($state.SqlIdentityName)"
+    $lines += "  Key Vault:                                  $($state.KeyVaultName)"
     $lines += "  Subscription:                               $($state.SubscriptionId)"
     $lines += "  Resource group:                             $($state.ResourceGroupName)"
     if ($script:LogFile) { $lines += "  Log file:                                   $($script:LogFile)" }
@@ -1843,7 +1943,11 @@ function Get-NeologikGraphScope {
     $state = $script:State
     $scopes = @('Application.ReadWrite.All', 'AppRoleAssignment.ReadWrite.All', 'Directory.Read.All', 'User.Read',
         'DelegatedPermissionGrant.Read.All', 'AgentIdentityBlueprint.Create', 'AgentIdentityBlueprint.AddRemoveCreds.All',
-        'AgentIdentityBlueprintPrincipal.Create')
+        'AgentIdentityBlueprintPrincipal.Create',
+        # Both runs assign the directory role Directory Readers to the SQL managed identity
+        # when the role is absent. The post migration script also removes the directory role
+        # Application Administrator from the deployment identity.
+        'RoleManagement.ReadWrite.Directory')
     if ($state.Run -eq 'PreWindow') {
         # The pre migration script adds the Neologik guest users and the signed-in administrator to
         # the security groups.
@@ -1858,11 +1962,9 @@ function Get-NeologikGraphScope {
         $scopes += 'AgentIdentityBlueprintPrincipal.ReadWrite.All'
     }
     if ($state.LaterRun) {
-        # The permission reduction removes the directory role Application Administrator
-        # from the deployment identity. The permission reduction also removes the membership
-        # of the Admin User Group, when the SQL server administrator is the deployment
-        # identity, and every other group membership.
-        $scopes += 'RoleManagement.ReadWrite.Directory'
+        # The permission reduction removes the membership of the Admin User Group, when the
+        # SQL server administrator is the deployment identity, and every other group
+        # membership of the deployment identity.
         $scopes += 'GroupMember.ReadWrite.All'
     }
     return $scopes
@@ -3772,13 +3874,15 @@ function Remove-NeologikAzureRoleAssignment {
 }
 
 function Get-NeologikDirectoryRoleHeld {
-    # Returns the directory roles that the deployment identity holds. The function reads
-    # the memberships of the deployment identity. The list of members of a directory role
-    # omits service principals, so that list would wrongly report a role as not held.
-    # Returns Id, RoleTemplateId and DisplayName for each role. A failed read throws, so
-    # that no caller reads a failure as an empty list.
-    $deploySp = $script:State.DeploySp
-    return @(Get-MgServicePrincipalMemberOf -ServicePrincipalId $deploySp.Id -All -ErrorAction Stop | ForEach-Object {
+    # Returns the directory roles that a service principal holds: the deployment identity,
+    # or the service principal that -ServicePrincipalId names. The function reads the
+    # memberships of the service principal. The list of members of a directory role omits
+    # service principals, so that list would wrongly report a role as not held. Returns Id,
+    # RoleTemplateId and DisplayName for each role. A failed read throws, so that no caller
+    # reads a failure as an empty list.
+    param([string]$ServicePrincipalId = '')
+    if (-not $ServicePrincipalId) { $ServicePrincipalId = $script:State.DeploySp.Id }
+    return @(Get-MgServicePrincipalMemberOf -ServicePrincipalId $ServicePrincipalId -All -ErrorAction Stop | ForEach-Object {
             $extra = Get-NeologikProperty $_ 'AdditionalProperties' @{}
             if (([string]$extra['@odata.type']) -eq '#microsoft.graph.directoryRole') {
                 [pscustomobject]@{ Id = $_.Id; RoleTemplateId = [string]$extra['roleTemplateId']; DisplayName = [string]$extra['displayName'] }
@@ -4288,12 +4392,7 @@ function Get-NeologikDirectoryIdentityResource {
     # Reads the directory managed identity from Azure Resource Manager. Returns $null when
     # the managed identity is absent. Throws with Azure's message for any other answer.
     param([Parameter(Mandatory)][string]$Path)
-    $response = Invoke-AzRestMethod -Method GET -Path $Path -ErrorAction Stop
-    $status = [int](Get-NeologikProperty $response 'StatusCode' 0)
-    $content = [string](Get-NeologikProperty $response 'Content' '')
-    if ($status -eq 404) { return $null }
-    if ($status -lt 200 -or $status -ge 300) { throw "Azure Resource Manager answered HTTP $status. $content" }
-    return ($content | ConvertFrom-Json)
+    return (Get-NeologikArmResource -Path $Path)
 }
 
 function New-NeologikDirectoryIdentityResource {
@@ -4392,6 +4491,482 @@ function Set-NeologikDirectoryIdentity {
     return ([bool]$outcome.Complete -and $outcome.Pending -eq 0 -and -not $state.OwnerWriteFailed)
 }
 
+# ----- The items of the onboarding kit that both runs confirm ------------------------------
+# After the post migration script the environment stands where a greenfield environment
+# onboarded with the current kit stands. The functions below confirm the items that the
+# kit creates for a new customer and that the steps above do not cover: the directory
+# role of the SQL managed identity, the resource providers and preview features, the
+# access model of the Key Vault, the settings and containers of the deployment storage
+# account, and, in the post migration script, the Azure roles of the Admin User Group.
+
+function Get-NeologikArmResource {
+    # One resource from Azure Resource Manager, or $null when the resource is absent.
+    # Throws with Azure's message for any other answer.
+    param([Parameter(Mandatory)][string]$Path)
+    $response = Invoke-AzRestMethod -Method GET -Path $Path -ErrorAction Stop
+    $status = [int](Get-NeologikProperty $response 'StatusCode' 0)
+    $content = [string](Get-NeologikProperty $response 'Content' '')
+    if ($status -eq 404) { return $null }
+    if ($status -lt 200 -or $status -ge 300) { throw "Azure Resource Manager answered HTTP $status. $content" }
+    if (-not $content) { return $null }
+    return ($content | ConvertFrom-Json)
+}
+
+function Invoke-NeologikArmWrite {
+    # One write to Azure Resource Manager with the Azure session. The function refuses the
+    # write in a run with -Verify. Returns the parsed body, or $null for an empty body.
+    # Throws with the status code and Azure's message when Azure refuses.
+    param([Parameter(Mandatory)][string]$Method, [Parameter(Mandatory)][string]$Path, [string]$Payload = '')
+    Assert-NeologikWriteAllowed -Description "$Method $Path"
+    $arguments = @{ Method = $Method; Path = $Path; ErrorAction = 'Stop' }
+    if ($Payload) { $arguments['Payload'] = $Payload }
+    $response = Invoke-AzRestMethod @arguments
+    $status = [int](Get-NeologikProperty $response 'StatusCode' 0)
+    $content = [string](Get-NeologikProperty $response 'Content' '')
+    if ($status -lt 200 -or $status -ge 300) {
+        $message = ''
+        try { $message = [string](Get-NeologikProperty (Get-NeologikProperty ($content | ConvertFrom-Json) 'error') 'message' '') } catch { $message = '' }
+        if (-not $message) { $message = $content }
+        throw "Azure Resource Manager answered HTTP $status. $message"
+    }
+    if (-not $content) { return $null }
+    return ($content | ConvertFrom-Json)
+}
+
+function Get-NeologikKitStandardItem {
+    # The summary items of the kit standard, for the rows a run skips as one.
+    return @('SQL managed identity', "SQL managed identity directory role: $($script:SqlIdentityDirectoryRoleName)",
+        'Resource providers and preview features', 'Key Vault access model: Azure role-based access control', 'Deployment storage account')
+}
+
+function Set-NeologikKitStandardItem {
+    <#
+    The items of the onboarding kit that both runs confirm beside the directory managed
+    identity: the directory role of the SQL managed identity, the resource providers and
+    preview features, the access model of the Key Vault and the settings of the deployment
+    storage account. The function needs the Azure session. Returns $true when every item
+    is in place.
+    #>
+    param([Parameter(Mandatory)][string]$StepPrefix)
+    $sql = Set-NeologikSqlIdentityDirectoryRole -StepLabel "$StepPrefix the SQL managed identity"
+    $providers = Set-NeologikResourceProvider -StepLabel "$StepPrefix the resource providers and preview features"
+    $vault = Set-NeologikKeyVaultAccessModel -StepLabel "$StepPrefix the Key Vault"
+    $storage = Set-NeologikDeploymentStorageAccount -StepLabel "$StepPrefix the deployment storage account"
+    return ($sql -and $providers -and $vault -and $storage)
+}
+
+function Set-NeologikSqlIdentityDirectoryRole {
+    <#
+    The SQL managed identity holds the directory role Directory Readers. The SQL server
+    uses the managed identity to look up Microsoft Entra accounts and groups at sign-in.
+    The function assigns the role when the role is absent, and activates the role in the
+    tenant when the tenant has never used the role. The onboarding kit assigns the same
+    role. Returns $true when the identity holds the role.
+    #>
+    param([Parameter(Mandatory)][string]$StepLabel)
+    $state = $script:State
+    $graph = $script:GraphV1
+    $name = [string](Get-NeologikProperty $state 'SqlIdentityName' '')
+    $item = "SQL managed identity directory role: $($script:SqlIdentityDirectoryRoleName)"
+    Write-Log $StepLabel -Level Info
+    $path = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)/providers/Microsoft.ManagedIdentity/userAssignedIdentities/${name}?api-version=$($script:ManagedIdentityApiVersion)"
+    try {
+        $identity = Get-NeologikArmResource -Path $path
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  SQL managed identity '$name': FAILED. $reason" -Level Error
+        Add-Summary 'SQL managed identity' "FAILED: $reason"
+        return $false
+    }
+    if (-not $identity) {
+        Write-Log "  SQL managed identity '$name': MISSING. The managed identity is not in the resource group" -Level Error
+        Add-Summary 'SQL managed identity' "MISSING: the managed identity $name is not in the resource group. Ask Neologik"
+        return $false
+    }
+    Write-Log "  SQL managed identity '$name': present" -Level Success
+    Add-Summary 'SQL managed identity' "Present: $name"
+    $principalId = [string](Get-NeologikProperty (Get-NeologikProperty $identity 'properties') 'principalId' '')
+    try {
+        $roles = @(Get-NeologikDirectoryRoleHeld -ServicePrincipalId $principalId)
+        if (@($roles | Where-Object { $_.RoleTemplateId -eq $script:SqlIdentityDirectoryRoleTemplateId }).Count -gt 0) {
+            Write-Log "  ${item}: already held" -Level Success
+            Add-Summary $item 'Already held'
+            return $true
+        }
+        if (Test-NeologikVerifyOnly) {
+            Add-NeologikPendingChange $item 'ASSIGN'
+            return $false
+        }
+        # The directory role object exists in the tenant once the role has been used. The
+        # script activates the role from the role template when the object is absent.
+        $role = @(Get-NeologikGraphCollection -Uri "$graph/directoryRoles?`$filter=roleTemplateId eq '$($script:SqlIdentityDirectoryRoleTemplateId)'") | Select-Object -First 1
+        if (-not $role) {
+            $role = Invoke-NeologikGraph -Method POST -Uri "$graph/directoryRoles" -Body (@{ roleTemplateId = $script:SqlIdentityDirectoryRoleTemplateId } | ConvertTo-Json -Compress)
+        }
+        $roleId = [string](Get-NeologikProperty $role 'id' '')
+        $ref = @{ '@odata.id' = "$graph/directoryObjects/$principalId" } | ConvertTo-Json -Compress
+        try {
+            $null = Invoke-NeologikGraph -Method POST -Uri "$graph/directoryRoles/$roleId/members/`$ref" -Body $ref
+        }
+        catch {
+            if ((Get-NeologikErrorText $_) -notmatch '(?i)already exist') { throw }
+            Write-Log "  ${item}: already held" -Level Success
+            Add-Summary $item 'Already held'
+            return $true
+        }
+        Write-Log "  ${item}: assigned" -Level Success
+        Add-Summary $item 'Assigned'
+        return $true
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        if (Test-NeologikPrivilegeError $_) { $reason = 'insufficient privileges. Sign in as a Global Administrator or as a Privileged Role Administrator' }
+        Write-Log "  ${item}: FAILED. $reason" -Level Error
+        Add-Summary $item "FAILED: $reason"
+        return $false
+    }
+}
+
+function Read-NeologikResourceProviderFile {
+    <#
+    Reads resource-providers.txt, the list of the onboarding kit that the migration
+    package carries. One entry per line. Text from # to the end of a line is a comment.
+    A resource provider has the form Microsoft.Example. A preview feature has the form
+    Microsoft.Example/FeatureName. Returns the providers and the features.
+    #>
+    param([Parameter(Mandatory)][string]$Path)
+    $providers = @()
+    $features = @()
+    $lineNumber = 0
+    foreach ($raw in @(Get-Content -LiteralPath $Path -Encoding UTF8)) {
+        $lineNumber++
+        $line = ($raw -replace '#.*$', '').Trim()
+        if (-not $line) { continue }
+        if ($line -match '^([A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9.]*)$') { $providers += $Matches[1]; continue }
+        if ($line -match '^([A-Za-z][A-Za-z0-9]*\.[A-Za-z][A-Za-z0-9.]*)/([A-Za-z][A-Za-z0-9]*)$') { $features += @{ Provider = $Matches[1]; Feature = $Matches[2] }; continue }
+        throw "resource-providers.txt line ${lineNumber}: '$line' is not valid. A resource provider has the form Microsoft.Example. A preview feature has the form Microsoft.Example/FeatureName"
+    }
+    return @{ Providers = @($providers | Select-Object -Unique); Features = @($features) }
+}
+
+function Get-NeologikRegistrationState {
+    # The registration state of one entry of resource-providers.txt: 'Registered',
+    # 'Registering', 'NotRegistered' or another state that Azure reports.
+    param([Parameter(Mandatory)][hashtable]$Entry)
+    $sub = $script:State.SubscriptionId
+    if ($Entry.Kind -eq 'Feature') {
+        $feature = Get-NeologikArmResource -Path "/subscriptions/$sub/providers/Microsoft.Features/providers/$($Entry.Provider)/features/$($Entry.Feature)?api-version=$($script:FeatureApiVersion)"
+        if (-not $feature) { return 'NotRegistered' }
+        return [string](Get-NeologikProperty (Get-NeologikProperty $feature 'properties') 'state' 'NotRegistered')
+    }
+    $provider = Invoke-NeologikArmRead -Path "/subscriptions/$sub/providers/$($Entry.Provider)?api-version=$($script:ResourceProviderApiVersion)"
+    return [string](Get-NeologikProperty $provider 'registrationState' 'NotRegistered')
+}
+
+function Set-NeologikResourceProvider {
+    <#
+    The resource providers and preview features of resource-providers.txt are registered
+    on the subscription. The onboarding kit registers the same list for a new customer.
+    The deployment identity cannot register a resource provider, so the signed-in
+    administrator does. The function submits each registration that is absent and waits
+    for the whole list together. Returns $true when every entry is registered.
+    #>
+    param([Parameter(Mandatory)][string]$StepLabel)
+    $state = $script:State
+    $item = 'Resource providers and preview features'
+    Write-Log $StepLabel -Level Info
+    $file = Join-Path $PSScriptRoot 'resource-providers.txt'
+    if (-not (Test-Path -LiteralPath $file)) {
+        Write-Log "  ${item}: SKIPPED. The file resource-providers.txt is not beside the script" -Level Error
+        Add-Summary $item 'SKIPPED: the file resource-providers.txt is not beside the script. Download the whole migration package and run the script again'
+        return $false
+    }
+    try {
+        $list = Read-NeologikResourceProviderFile -Path $file
+        $sub = $state.SubscriptionId
+        $pending = @()
+        foreach ($namespace in $list.Providers) {
+            $entry = @{ Kind = 'Provider'; Provider = $namespace; Label = "Resource provider: $namespace"; Register = "/subscriptions/$sub/providers/$namespace/register?api-version=$($script:ResourceProviderApiVersion)" }
+            if ((Get-NeologikRegistrationState -Entry $entry) -ne 'Registered') { $pending += $entry }
+        }
+        foreach ($feature in $list.Features) {
+            $entry = @{ Kind = 'Feature'; Provider = $feature.Provider; Feature = $feature.Feature; Label = "Preview feature: $($feature.Provider)/$($feature.Feature)"; Register = "/subscriptions/$sub/providers/Microsoft.Features/providers/$($feature.Provider)/features/$($feature.Feature)/register?api-version=$($script:FeatureApiVersion)" }
+            if ((Get-NeologikRegistrationState -Entry $entry) -ne 'Registered') { $pending += $entry }
+        }
+        if ($pending.Count -eq 0) {
+            Write-Log "  ${item}: already registered, $($list.Providers.Count) resource providers and $($list.Features.Count) preview features" -Level Success
+            Add-Summary $item "Already registered: $($list.Providers.Count) resource providers and $($list.Features.Count) preview features"
+            return $true
+        }
+        if (Test-NeologikVerifyOnly) {
+            foreach ($entry in $pending) { Add-NeologikPendingChange $entry.Label 'REGISTER' }
+            return $false
+        }
+        foreach ($entry in $pending) {
+            $null = Invoke-NeologikArmWrite -Method POST -Path $entry.Register
+            Write-Log "  $($entry.Label): registration submitted" -Level Info
+        }
+        # Azure takes some minutes to register a resource provider. The script waits for
+        # the whole list together, a limited number of reads apart.
+        $remaining = @($pending)
+        for ($poll = 1; $poll -le $script:ProviderRegistrationPolls -and $remaining.Count -gt 0; $poll++) {
+            Start-Sleep -Seconds $script:ProviderPollSeconds
+            $remaining = @($remaining | Where-Object { (Get-NeologikRegistrationState -Entry $_) -ne 'Registered' })
+        }
+        $complete = $true
+        $remainingLabels = @($remaining | ForEach-Object { $_.Label })
+        foreach ($entry in $pending) {
+            if ($remainingLabels -contains $entry.Label) {
+                Write-Log "  $($entry.Label): PENDING. Azure completes the registration without further action" -Level Warning
+                Add-Summary $entry.Label 'PENDING: the registration is in progress. Azure completes the registration without further action. Run the script again to confirm'
+                $complete = $false
+            }
+            else {
+                Write-Log "  $($entry.Label): registered" -Level Success
+                Add-Summary $entry.Label 'Registered'
+            }
+        }
+        return $complete
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        if ($reason -match '(?i)AuthorizationFailed|does not have authorization|Forbidden') {
+            $reason = 'insufficient privileges. The signed-in account needs Contributor or Owner on the subscription'
+        }
+        Write-Log "  ${item}: FAILED. $reason" -Level Error
+        Add-Summary $item "FAILED: $reason"
+        return $false
+    }
+}
+
+function Set-NeologikKeyVaultAccessModel {
+    <#
+    The Key Vault uses Azure role-based access control. The deployment grants each
+    identity the secrets that the identity reads through role assignments, and a Key
+    Vault on access policies ignores those assignments. The onboarding kit creates the
+    Key Vault with Azure role-based access control. Returns $true when the setting is on.
+    #>
+    param([Parameter(Mandatory)][string]$StepLabel)
+    $state = $script:State
+    $name = [string](Get-NeologikProperty $state 'KeyVaultName' '')
+    $item = 'Key Vault access model: Azure role-based access control'
+    Write-Log $StepLabel -Level Info
+    $path = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)/providers/Microsoft.KeyVault/vaults/${name}?api-version=$($script:KeyVaultApiVersion)"
+    try {
+        $vault = Get-NeologikArmResource -Path $path
+        if (-not $vault) {
+            Write-Log "  Key Vault '$name': MISSING. The Key Vault is not in the resource group" -Level Error
+            Add-Summary $item "MISSING: the Key Vault $name is not in the resource group. Ask Neologik"
+            return $false
+        }
+        $enabled = [bool](Get-NeologikProperty (Get-NeologikProperty $vault 'properties') 'enableRbacAuthorization' $false)
+        if ($enabled) {
+            Write-Log "  ${item}: already on" -Level Success
+            Add-Summary $item 'Already on'
+            return $true
+        }
+        if (Test-NeologikVerifyOnly) {
+            Add-NeologikPendingChange $item 'SET'
+            return $false
+        }
+        $null = Invoke-NeologikArmWrite -Method PATCH -Path $path -Payload (@{ properties = @{ enableRbacAuthorization = $true } } | ConvertTo-Json -Compress)
+        Write-Log "  ${item}: set" -Level Success
+        Add-Summary $item 'Set'
+        return $true
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  ${item}: FAILED. $reason" -Level Error
+        Add-Summary $item "FAILED: $reason"
+        return $false
+    }
+}
+
+function Get-NeologikOnboardingStorageAccountName {
+    # The storage account that the onboarding script created, named by the configuration
+    # file or found in the resource group by its name 'stneodeploy...'. Empty when the
+    # resource group holds none.
+    $state = $script:State
+    $name = [string](Get-NeologikProperty $state 'OnboardingStorageAccountName' '')
+    if ($name) { return $name }
+    try {
+        $found = @(Get-AzStorageAccount -ResourceGroupName $state.ResourceGroupName -ErrorAction Stop |
+            Where-Object { [string](Get-NeologikProperty $_ 'StorageAccountName' '') -like 'stneodeploy*' } |
+            ForEach-Object { [string](Get-NeologikProperty $_ 'StorageAccountName' '') } | Sort-Object)
+        if ($found.Count -gt 0) {
+            $state.OnboardingStorageAccountName = $found[0]
+            return $found[0]
+        }
+    }
+    catch { Write-Log "  The script could not list the storage accounts of the resource group. $(Get-NeologikErrorText $_)" -Level Warning }
+    return ''
+}
+
+function Set-NeologikDeploymentStorageAccount {
+    <#
+    The deployment storage account, which the onboarding created, accepts Microsoft Entra
+    authentication only, allows no public blob access, requires TLS 1.2 and holds the
+    containers certificate, json and logs. The onboarding kit creates the storage account
+    with those settings and containers. Returns $true when every setting and container is
+    in place, and when the resource group holds no such storage account.
+    #>
+    param([Parameter(Mandatory)][string]$StepLabel)
+    $state = $script:State
+    Write-Log $StepLabel -Level Info
+    $name = Get-NeologikOnboardingStorageAccountName
+    if (-not $name) {
+        Write-Log '  Deployment storage account: not checked. No storage account named stneodeploy... is in the resource group' -Level Info
+        Add-Summary 'Deployment storage account' 'Not checked: no storage account named stneodeploy... is in the resource group'
+        return $true
+    }
+    $base = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)/providers/Microsoft.Storage/storageAccounts/$name"
+    $complete = $true
+    try {
+        $account = Get-NeologikArmResource -Path "${base}?api-version=$($script:StorageApiVersion)"
+        if (-not $account) {
+            Write-Log "  Deployment storage account '$name': MISSING" -Level Error
+            Add-Summary 'Deployment storage account' "MISSING: the storage account $name is not in the resource group"
+            return $false
+        }
+        $properties = Get-NeologikProperty $account 'properties' @{}
+        $settings = @(
+            @{ Item = "Deployment storage account $name shared key access: off"; Name = 'allowSharedKeyAccess'; Expected = $false; Current = (Get-NeologikProperty $properties 'allowSharedKeyAccess' $true) },
+            @{ Item = "Deployment storage account $name public blob access: off"; Name = 'allowBlobPublicAccess'; Expected = $false; Current = (Get-NeologikProperty $properties 'allowBlobPublicAccess' $true) },
+            @{ Item = "Deployment storage account $name minimum TLS version: 1.2"; Name = 'minimumTlsVersion'; Expected = 'TLS1_2'; Current = (Get-NeologikProperty $properties 'minimumTlsVersion' 'TLS1_0') })
+        $changes = @{}
+        foreach ($setting in $settings) {
+            if ("$($setting.Current)" -eq "$($setting.Expected)") {
+                Write-Log "  $($setting.Item): already set" -Level Success
+                Add-Summary $setting.Item 'Already set'
+            }
+            elseif (Test-NeologikVerifyOnly) {
+                Add-NeologikPendingChange $setting.Item 'SET'
+                $complete = $false
+            }
+            else { $changes[$setting.Name] = $setting.Expected }
+        }
+        if ($changes.Count -gt 0) {
+            $null = Invoke-NeologikArmWrite -Method PATCH -Path "${base}?api-version=$($script:StorageApiVersion)" -Payload (@{ properties = $changes } | ConvertTo-Json -Compress)
+            foreach ($setting in $settings) {
+                if ($changes.ContainsKey($setting.Name)) {
+                    Write-Log "  $($setting.Item): set" -Level Success
+                    Add-Summary $setting.Item 'Set'
+                }
+            }
+        }
+        foreach ($container in $script:DeploymentStorageContainers) {
+            $containerItem = "Deployment storage account $name container: $container"
+            $containerPath = "$base/blobServices/default/containers/${container}?api-version=$($script:StorageApiVersion)"
+            if (Get-NeologikArmResource -Path $containerPath) {
+                Add-Summary $containerItem 'Present'
+                continue
+            }
+            if (Test-NeologikVerifyOnly) {
+                Add-NeologikPendingChange $containerItem 'CREATE'
+                $complete = $false
+                continue
+            }
+            $null = Invoke-NeologikArmWrite -Method PUT -Path $containerPath -Payload '{}'
+            Write-Log "  ${containerItem}: created" -Level Success
+            Add-Summary $containerItem 'Created'
+        }
+        return $complete
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  Deployment storage account '$name': FAILED. $reason" -Level Error
+        Add-Summary 'Deployment storage account' "FAILED: $reason"
+        return $false
+    }
+}
+
+function Get-NeologikAdminGroupRoleItem {
+    # The summary items of step 6j, for the rows the step skips as one.
+    $items = @()
+    foreach ($roleName in $script:AdminGroupRequiredRgRoles) { $items += "Admin User Group resource group role: $roleName" }
+    $items += 'Admin User Group other roles'
+    return $items
+}
+
+function Set-NeologikAdminGroupRole {
+    <#
+    Step 6j of the post migration script: the Azure roles of the Admin User Group. The
+    onboarding kit gives the group thirteen roles on the resource group and no role on
+    the subscription. The function assigns each of the thirteen roles that is absent.
+    When the group holds all thirteen, the function removes every other role that the
+    group holds in the subscription: on the subscription, on the resource group and
+    below. A role outside the subscription is listed and kept. The function removes
+    nothing unless the group holds all thirteen roles. Returns $true when the group holds
+    exactly the thirteen roles in the subscription.
+    #>
+    $state = $script:State
+    $groupId = [string](Get-NeologikProperty $state 'AdminGroupId' '')
+    if (-not $groupId) {
+        Write-Log '  The command does not name the Admin User Group. The script leaves the roles of that group' -Level Info
+        Add-Summary 'Admin User Group roles' 'Not checked: the command does not name the Admin User Group'
+        return $true
+    }
+    Write-Log 'Step 6 of 6: the Azure roles of the Admin User Group' -Level Info
+    $rgScope = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
+    $subScope = "/subscriptions/$($state.SubscriptionId)"
+    $held = $true
+    foreach ($roleName in $script:AdminGroupRequiredRgRoles) {
+        if (-not (Set-NeologikAzureRoleAssignment -RoleName $roleName -Scope $rgScope -Label 'Admin User Group resource group' -ObjectId $groupId)) { $held = $false }
+    }
+    if (-not $held) {
+        Write-Log '  The Admin User Group does not hold all thirteen roles on the resource group. The script removes no role from the group' -Level Warning
+        Add-Summary 'Admin User Group other roles' 'SKIPPED: the Admin User Group does not hold all thirteen roles on the resource group'
+        return $false
+    }
+    try {
+        $assignments = @(Get-AzRoleAssignment -ObjectId $groupId -ErrorAction Stop)
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  Admin User Group other roles: FAILED. The script could not list the Azure roles of the group. $reason" -Level Error
+        Add-Summary 'Admin User Group other roles' "FAILED: $reason"
+        return $false
+    }
+    $other = @($assignments | Where-Object {
+            -not (([string]$_.Scope) -eq $rgScope -and $script:AdminGroupRequiredRgRoles -contains [string]$_.RoleDefinitionName)
+        })
+    $inSubscription = @($other | Where-Object { ([string]$_.Scope).StartsWith($subScope, [System.StringComparison]::OrdinalIgnoreCase) })
+    foreach ($assignment in @($other | Where-Object { -not ([string]$_.Scope).StartsWith($subScope, [System.StringComparison]::OrdinalIgnoreCase) })) {
+        $label = "Admin User Group role outside the subscription: $([string]$assignment.RoleDefinitionName) on $(ConvertTo-NeologikScopeLabel ([string]$assignment.Scope))"
+        Write-Log "  ${label}: review. The script changes nothing outside the subscription" -Level Warning
+        Add-Summary $label 'Review: outside the subscription. The script changes nothing there'
+    }
+    if ($inSubscription.Count -eq 0) {
+        Write-Log '  Admin User Group other roles: none' -Level Success
+        Add-Summary 'Admin User Group other roles' 'None'
+        return $true
+    }
+    $complete = $true
+    foreach ($assignment in $inSubscription) {
+        $roleName = [string]$assignment.RoleDefinitionName
+        $scope = [string]$assignment.Scope
+        $label = "Admin User Group other role: $roleName on $(ConvertTo-NeologikScopeLabel $scope)"
+        if (Test-NeologikVerifyOnly) {
+            Add-NeologikPendingChange $label 'REMOVE'
+            $complete = $false
+            continue
+        }
+        try {
+            Invoke-NeologikWrite -Command 'Remove-AzRoleAssignment' -Parameters @{ ObjectId = $groupId; RoleDefinitionName = $roleName; Scope = $scope } | Out-Null
+            Write-Log "  ${label}: removed" -Level Success
+            Add-Summary $label 'Removed'
+        }
+        catch {
+            $reason = Get-NeologikErrorText $_
+            Write-Log "  ${label}: FAILED. $reason" -Level Error
+            Add-Summary $label "FAILED: $reason"
+            $complete = $false
+        }
+    }
+    return $complete
+}
+
 function Invoke-NeologikPermissionReduction {
     <#
     The last step of the post migration script: the permission reduction. The function first
@@ -4406,15 +4981,20 @@ function Invoke-NeologikPermissionReduction {
     foreach ($roleName in $script:LegacySubRoles) { $reductionItems += "Subscription role to remove: $roleName" }
     if ($state.ScriptRunnerObjectId) { $reductionItems += Get-NeologikScriptRunnerItem }
     $reductionItems += @('Application Administrator role', 'Admin User Group membership', 'Other Azure roles', 'Other directory roles', 'Other group memberships', 'Orphaned role assignments')
+    if ($state.AdminGroupId) { $reductionItems += Get-NeologikAdminGroupRoleItem }
     if (-not $state.AzureConnected) {
         foreach ($item in $reductionItems) { Add-Summary $item 'SKIPPED: the script did not confirm the Azure roles of the deployment identity' }
         Add-Summary 'Directory managed identity' 'SKIPPED: the sign-in to Azure failed'
+        foreach ($item in Get-NeologikKitStandardItem) { Add-Summary $item 'SKIPPED: the sign-in to Azure failed' }
         return
     }
     # The two items that the Neologik Platform needs from version 5.2. Neither item
     # changes the access of the deployment identity.
     $credentialReady = Set-NeologikDeploymentCredential -StepLabel 'Step 6 of 6: the federated credential of the deployment identity'
     $identityReady = Set-NeologikDirectoryIdentity -StepLabel 'Step 6 of 6: the directory managed identity'
+    # The items of the onboarding kit that both runs confirm. None of them changes the
+    # access of the deployment identity.
+    $kitItemsReady = Set-NeologikKitStandardItem -StepPrefix 'Step 6 of 6:'
     if (-not $held) {
         Write-Log '  The deployment identity does not hold all ten Azure roles. The script removes no access' -Level Warning
         foreach ($item in $reductionItems) { Add-Summary $item 'SKIPPED: the deployment identity does not hold all ten Azure roles' }
@@ -4447,14 +5027,20 @@ function Invoke-NeologikPermissionReduction {
     # gone.
     Remove-NeologikOrphanedRoleAssignment
 
-    # Step 6i: the script runner identity. Reader on the resource group, then the removal
-    # of Contributor on the subscription and on the resource group.
+    # Step 6i: the script runner identity. Reader and Key Vault Secrets Officer on the
+    # resource group, then the removal of Contributor on the subscription and on the
+    # resource group.
     Remove-NeologikScriptRunnerWideRole
 
-    # Step 6j: record the version of the onboarding kit, after every step above. The tag
+    # Step 6j: the Azure roles of the Admin User Group. The thirteen roles of the
+    # onboarding kit on the resource group, then the removal of every other role of the
+    # group in the subscription.
+    $adminGroupReady = Set-NeologikAdminGroupRole
+
+    # Step 6k: record the version of the onboarding kit, after every step above. The tag
     # tells the next deployment that the items of this version are in place.
-    if (($credentialReady -and $identityReady) -or (Test-NeologikVerifyOnly)) { Set-NeologikKitVersionTag -ResourceId $rgScope }
-    else { Add-Summary 'Onboarding kit version tag' 'SKIPPED: the federated credential or the directory managed identity is not complete. Run the script again' }
+    if (($credentialReady -and $identityReady -and $kitItemsReady -and $adminGroupReady) -or (Test-NeologikVerifyOnly)) { Set-NeologikKitVersionTag -ResourceId $rgScope }
+    else { Add-Summary 'Onboarding kit version tag' 'SKIPPED: the federated credential, the directory managed identity or another item of the onboarding kit is not complete. Run the script again' }
 }
 
 # ----- Snapshot, upload and the file list ------------------------------------------
@@ -4625,16 +5211,7 @@ function Get-NeologikUploadTarget {
     #>
     $state = $script:State
     $targets = @()
-    $onboarding = [string](Get-NeologikProperty $state 'OnboardingStorageAccountName' '')
-    if (-not $onboarding) {
-        try {
-            $found = @(Get-AzStorageAccount -ResourceGroupName $state.ResourceGroupName -ErrorAction Stop |
-                Where-Object { [string](Get-NeologikProperty $_ 'StorageAccountName' '') -like 'stneodeploy*' } |
-                ForEach-Object { [string](Get-NeologikProperty $_ 'StorageAccountName' '') } | Sort-Object)
-            if ($found.Count -gt 0) { $onboarding = $found[0] }
-        }
-        catch { Write-Log "  The script could not list the storage accounts of the resource group. $(Get-NeologikErrorText $_)" -Level Warning }
-    }
+    $onboarding = Get-NeologikOnboardingStorageAccountName
     if ($onboarding) { $targets += @{ Account = $onboarding; Kind = 'onboarding'; LogContainer = 'logs'; FileContainer = 'json' } }
     $named = [string](Get-NeologikProperty $state 'UploadStorageAccountName' '')
     if ($named -and $named -ne $onboarding) { $targets += @{ Account = $named; Kind = 'named'; LogContainer = 'onboarding-access'; FileContainer = 'onboarding-access' } }
@@ -5068,14 +5645,24 @@ function Invoke-NeologikPreWindowRun {
     $credentialReady = Set-NeologikDeploymentCredential -StepLabel 'Step 4c of 5: the federated credential of the deployment identity'
     $held = Set-NeologikDeploymentAzureRole -StepLabel 'Step 5 of 5: the Azure roles of the deployment identity'
     $identityReady = $false
-    if ($state.AzureConnected) { $identityReady = Set-NeologikDirectoryIdentity -StepLabel 'Step 5b of 5: the directory managed identity' }
-    else { Add-Summary 'Directory managed identity' 'SKIPPED: the sign-in to Azure failed' }
-    if ($held -and (($credentialReady -and $identityReady) -or (Test-NeologikVerifyOnly))) {
+    $kitItemsReady = $false
+    if ($state.AzureConnected) {
+        $identityReady = Set-NeologikDirectoryIdentity -StepLabel 'Step 5b of 5: the directory managed identity'
+        # The items of the onboarding kit that both runs confirm: the directory role of the
+        # SQL managed identity, the resource providers and preview features, the Key Vault
+        # access model and the deployment storage account.
+        $kitItemsReady = Set-NeologikKitStandardItem -StepPrefix 'Step 5c of 5:'
+    }
+    else {
+        Add-Summary 'Directory managed identity' 'SKIPPED: the sign-in to Azure failed'
+        foreach ($item in Get-NeologikKitStandardItem) { Add-Summary $item 'SKIPPED: the sign-in to Azure failed' }
+    }
+    if ($held -and (($credentialReady -and $identityReady -and $kitItemsReady) -or (Test-NeologikVerifyOnly))) {
         # The Neologik Platform reads the tag before an upgrade.
         Set-NeologikKitVersionTag -ResourceId "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
     }
     elseif ($held) {
-        Add-Summary 'Onboarding kit version tag' 'SKIPPED: the federated credential or the directory managed identity is not complete. Run the script again'
+        Add-Summary 'Onboarding kit version tag' 'SKIPPED: the federated credential, the directory managed identity or another item of the onboarding kit is not complete. Run the script again'
     }
     # The quotas, read with the same Azure session, after the roles: a quota that is short
     # is settled with Microsoft before the migration.
@@ -5212,6 +5799,8 @@ function Invoke-NeologikEnvironmentMigration {
         [string[]]$BotAppClientIds,
         [string]$DirectoryIdentityName,
         [string]$EnvironmentName,
+        [string]$SqlIdentityName,
+        [string]$KeyVaultName,
         [string]$UserGroupId,
         [string]$NceUserGroupId,
         [string]$AdminGroupId,
@@ -5255,6 +5844,8 @@ function Invoke-NeologikEnvironmentMigration {
             BotAppClientIds         = @($BotAppClientIds)
             DirectoryIdentityName   = $DirectoryIdentityName
             EnvironmentName         = $EnvironmentName
+            SqlIdentityName         = $SqlIdentityName
+            KeyVaultName            = $KeyVaultName
             UserGroupId             = $UserGroupId
             NceUserGroupId          = $NceUserGroupId
             AdminGroupId            = $AdminGroupId

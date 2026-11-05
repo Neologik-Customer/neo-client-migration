@@ -36,7 +36,7 @@ The grants for agents and Apps that work unattended in Microsoft 365 are not par
 | PowerShell 7.4 or later | The migration script stops on an earlier version |
 | A workstation with a desktop and a browser | The migration script opens the sign-in page in the browser of the workstation. You complete the sign-in in the browser |
 | A Global Administrator account in your tenant | Only a Global Administrator can grant and remove Microsoft Graph application permissions and directory roles |
-| Owner on the subscription | The same account changes the Azure role assignments of the deployment identity, and creates the directory managed identity on the resource group |
+| Owner on the subscription | The same account changes the Azure role assignments of the deployment identity and of the Admin User Group, creates the directory managed identity on the resource group, registers resource providers, and changes the settings of the Key Vault and of the deployment storage account |
 | The command from Neologik | The command names your tenant, your subscription, your resource group, the application registrations of the environment and the version of the onboarding kit that the migration brings your environment to |
 
 The migration script installs the PowerShell modules that the run needs, for your user account, when the modules are missing: the Microsoft Graph modules and the Az modules.
@@ -51,7 +51,7 @@ Each run makes one more check before the run changes an Azure role. The signed-i
 
 ## How to run the migration script
 
-1. Place the migration package in a folder on your workstation. The pre migration script reads `NeologikGuestUsers.txt` from the folder of `Migrate-NeologikEnvironment.ps1`.
+1. Place the migration package in a folder on your workstation. The migration script reads `NeologikGuestUsers.txt` and `resource-providers.txt` from the folder of `Migrate-NeologikEnvironment.ps1`.
 2. Open PowerShell 7 in that folder.
 3. Paste the command from Neologik and press Enter.
 4. The migration script opens the sign-in page in your browser. Sign in as a Global Administrator who also holds Owner or User Access Administrator on the subscription. The account picker may offer another account that is a Global Administrator but holds no role on the subscription, such as a guest account; the Azure steps are skipped for that account and the run must be repeated. The migration script waits for up to 5 minutes.
@@ -132,7 +132,7 @@ The migration script confirms that the deployment identity holds ten Azure roles
 
 The deployment runs the ingress controller of a Private Endpoint environment with Application Gateway for Containers. Microsoft requires the identity of that controller to hold two roles. The first is Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster. That resource group is outside the resource group of the environment. The second is AppGw for Containers Configuration Manager on the resource group of the environment. The third role is Cost Management Reader on the resource group that Azure Kubernetes Service creates for the nodes of the cluster: the identity of the configuration API of the Neologik Platform holds it and reads the daily cost of the nodes for the return on investment report. The condition on the role lets the deployment identity assign those three roles and no other role. The deployment identity may already hold Role Based Access Control Administrator on the subscription without the condition. The pre migration script then reports `Already assigned without the limit` and keeps the role, because the pre migration script removes nothing. The post migration script removes that assignment and creates the assignment again with the condition. The post migration script then reports `Limit applied`.
 
-When the deployment identity holds all ten roles and the federated credential and the directory managed identity are complete, the migration script records the version of the onboarding kit that the command names on the resource group. The record is the tag `NeologikOnboardingKit`. The migration script keeps your other tags and writes the tag only when the value differs. The Neologik Platform reads the tag before an upgrade.
+When the deployment identity holds all ten roles and the federated credential, the directory managed identity and the items of step 5c are complete, the migration script records the version of the onboarding kit that the command names on the resource group. The record is the tag `NeologikOnboardingKit`. The migration script keeps your other tags and writes the tag only when the value differs. The Neologik Platform reads the tag before an upgrade.
 
 Step 5 changes no managed identity, no security group and no user. The pre migration script removes no role, no permission and no membership.
 
@@ -149,6 +149,19 @@ This step prepares your environment for version 5.2 of the Neologik Platform. Fr
 The deployment identity already holds the same permission and owns the same application registrations. The migration script changes nothing that the deployment identity holds.
 
 Nothing can sign in as the managed identity until a deployment by Neologik adds the sign-in credential.
+
+### Step 5c: The items of the onboarding kit
+
+After the post migration script, your environment stands where an environment onboarded with the current onboarding kit stands. Both runs confirm the items below and add what is absent. Each item is one the onboarding kit creates for a new customer.
+
+| Item | What the migration script does |
+|---|---|
+| The SQL managed identity | Confirms that the managed identity, which the command names with `-SqlIdentityName`, holds the directory role Directory Readers. Your SQL server uses the managed identity to look up Microsoft Entra accounts and groups at sign-in. The migration script assigns the role when the role is absent. When your tenant has never used the role, the migration script activates the role from its template first |
+| The resource providers and preview features | Confirms that every entry of `resource-providers.txt`, the list that the migration package carries beside the migration script, is registered on your subscription. The migration script submits each registration that is absent and waits for the whole list together, for ten minutes at most. A registration that Azure has not finished by then reads `PENDING`; Azure completes the registration without further action, and a later run confirms the registration |
+| The Key Vault | Confirms that the Key Vault, which the command names with `-KeyVaultName`, uses Azure role-based access control. The deployment grants each identity the secrets that the identity reads through role assignments, and a Key Vault on access policies ignores those assignments. The migration script turns the setting on when the setting is off |
+| The deployment storage account | Confirms that the storage account that the onboarding created, named `stneodeploy...`, accepts Microsoft Entra authentication only, allows no public blob access, requires TLS 1.2 and holds the containers `certificate`, `json` and `logs`. The migration script changes a setting that differs and creates a container that is absent. When the resource group holds no such storage account, the summary reads `Not checked` |
+
+Step 5c creates no user, no group and no application registration. The migration script removes nothing in step 5c.
 
 ### Step 5a: The Azure quotas that the migration needs
 
@@ -179,12 +192,13 @@ The migration script first confirms the two Microsoft Graph application permissi
 | Every other Azure role in the subscription | The role is outside the ten roles of step 5. The migration script keeps two roles below the resource group. The first is `Cognitive Services Content Understanding Contributor` on a resource in the resource group. The second is `Storage Blob Data Contributor` on the container `function-package` |
 | Every other directory role | The deployment identity holds the role |
 | Every other group membership | The deployment identity is a member |
-| Contributor on the subscription and on the resource group from the script runner identity. The script runner identity is the managed identity `neologik-script-runner-service-connection-<short name>`. The deployment runs scripts with that managed identity | The command names the identity with `-ScriptRunnerObjectId`, and the identity holds Reader on the resource group. The migration script gives the identity Reader first. The identity keeps Key Vault Secrets Officer and Azure Bot Service Contributor Role on the resource group |
+| Contributor on the subscription and on the resource group from the script runner identity. The script runner identity is the managed identity `neologik-script-runner-service-connection-<short name>`. The deployment runs scripts with that managed identity | The command names the identity with `-ScriptRunnerObjectId`, and the identity holds Reader and Key Vault Secrets Officer on the resource group. The migration script assigns those two roles first. The identity keeps Azure Bot Service Contributor Role on the resource group |
+| Every role of the group `Neologik Admin User Group - <short name>` in the subscription beyond the thirteen roles of the onboarding kit. The onboarding kit gives the group thirteen roles on the resource group and no role on the subscription: Contributor, Azure Kubernetes Service Cluster Admin Role, Azure Kubernetes Service RBAC Cluster Admin, Key Vault Administrator, Key Vault Secrets Officer, Key Vault Certificates Officer, Storage Blob Data Owner, Storage Blob Data Contributor, Storage Table Data Contributor, Cognitive Services Data Reader, Cognitive Services OpenAI Contributor, Search Index Data Reader and Azure AI Developer | The command names the group with `-AdminGroupId`, and the group holds all thirteen roles on the resource group. The migration script assigns a missing role first. A role of the group outside the subscription is listed as `Review` and kept |
 | Every role assignment on the resource group whose identity is gone | The identity of the assignment is gone from Microsoft Entra ID. Such a role assignment grants nothing, and the Azure portal shows the role assignment as "Identity not found". The migration script confirms with Microsoft Entra ID that the identity is gone, then removes the role assignment. An assignment whose identity still exists is kept and reads `Review` in the summary |
 
-The post migration script also confirms the federated credential of step 4 and the directory managed identity of step 5b, and adds what is absent. These two items change nothing that the deployment identity holds.
+The post migration script also confirms the federated credential of step 4, the directory managed identity of step 5b and the items of step 5c, and adds what is absent. None of these items changes what the deployment identity holds.
 
-Last, when those two items are complete, the migration script records the version of the onboarding kit on the resource group, in the tag `NeologikOnboardingKit`.
+Last, when those items and the roles of the Admin User Group are complete, the migration script records the version of the onboarding kit on the resource group, in the tag `NeologikOnboardingKit`. Your environment then stands where an environment onboarded with that version of the onboarding kit stands.
 
 ## What the migration script never does
 
@@ -209,11 +223,11 @@ The migration script signs in to Microsoft Graph with your account. At the first
 | `User.Read` | Every run | To identify your account |
 | `DelegatedPermissionGrant.Read.All` | Every run | To read the consent of the Platform Sign-in application |
 | `AgentIdentityBlueprint.Create`<br>`AgentIdentityBlueprint.AddRemoveCreds.All`<br>`AgentIdentityBlueprintPrincipal.Create` | Every run | To create the agent identity blueprint, the service principal and the federated credentials when each is absent |
+| `RoleManagement.ReadWrite.Directory` | Every run | To assign the directory role Directory Readers to the SQL managed identity when the role is absent. In the post migration script, also to remove directory roles from the deployment identity |
 | `GroupMember.ReadWrite.All` | The pre migration script | To add the Neologik guest users and the signed-in administrator to the security groups |
 | `Group.ReadWrite.All` | The pre migration script | To create a security group that is absent, and to rename the user group of the Neologik Context Engine |
 | `User.Invite.All` | The pre migration script | To invite a Neologik support account that is not yet a guest of your tenant |
 | `AgentIdentityBlueprintPrincipal.ReadWrite.All` | The pre migration script | To add the deployment identity as an owner of the service principal of the agent identity blueprint. The migration script adds the owner when that service principal has none |
-| `RoleManagement.ReadWrite.Directory` | The post migration script | To remove directory roles from the deployment identity |
 | `GroupMember.ReadWrite.All` | The post migration script | To remove the deployment identity from groups |
 
 The sign-in to Azure uses the same account and shows no list of permissions.
@@ -251,8 +265,8 @@ No file holds a secret.
 
 | Result | Meaning |
 |---|---|
-| `Present`, `Already granted`, `Already assigned`, `Already an owner`, `Already set`, `None`, `Not held`, `None from another source` | Nothing to change |
-| `Created`, `Added`, `Granted`, `Assigned`, `Set`, `Removed`, `Limit applied` | Changed in this run |
+| `Present`, `Already granted`, `Already assigned`, `Already an owner`, `Already set`, `Already held`, `Already on`, `Already registered`, `None`, `Not held`, `None from another source` | Nothing to change |
+| `Created`, `Added`, `Granted`, `Assigned`, `Set`, `Registered`, `Removed`, `Limit applied` | Changed in this run |
 | `Review` | Listed for you to read. The migration script changed nothing |
 | `Not checked`, `Not needed`, `Not listed`, `Not required`, `HELD` | The item did not apply to this run, or the migration script keeps the item on purpose. The row gives the reason |
 | `WOULD` | A change that a run without `-Verify` would make |
