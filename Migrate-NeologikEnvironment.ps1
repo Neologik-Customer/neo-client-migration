@@ -143,13 +143,12 @@
       The script confirms that the deployment identity holds ten Azure roles:
       seven roles on the resource group and three roles on the subscription. The
       roles on the subscription are Reader, Cost Management Contributor and Role
-      Based Access Control Administrator limited to three roles. The deployment uses
+      Based Access Control Administrator limited to two roles. The deployment uses
       Cost Management Contributor, so that the deployment can delete a retired budget,
       cost view or scheduled cost email. The limited role lets
-      the deployment assign Reader, AppGw for Containers Configuration Manager and Cost Management Reader
-      to the identity of the ingress controller of a Private Endpoint environment, and Cost
-      Management Reader to the identity of the configuration API of the platform,
-      and no other role. The script assigns a role that is absent and removes nothing.
+      the deployment assign Reader to the identity of the ingress controller of a Private
+      Endpoint environment, and Cost Management Reader to the identity of the configuration
+      API of the platform, to service principals only, and no other role. The script assigns a role that is absent and removes nothing.
       When the limited role is already held without the limit, the pre migration script
       reports it and the post migration script applies the limit.
 
@@ -625,13 +624,12 @@ $script:RequiredSubRoles = @(
 )
 
 # The third role on the subscription: Role Based Access Control Administrator, limited
-# by a condition to three roles. The deployment runs the ingress controller of a secure
-# environment with Application Gateway for Containers. Microsoft requires the identity
-# of that controller to hold Reader on the resource group that Azure Kubernetes
-# Service creates for the nodes of the cluster, which is outside the resource group of
-# the environment, and AppGw for Containers Configuration Manager on the resource
+# by a condition to two roles, for service principals only. The deployment runs the ingress
+# controller of a secure environment with Application Gateway for Containers. Microsoft
+# requires the identity of that controller to hold Reader on the resource group that Azure
+# Kubernetes Service creates for the nodes of the cluster, which is outside the resource
 # group of the environment. The condition lets the deployment identity assign those
-# three roles and no other role, and remove only those three.
+# two roles and no other role, and remove only those two.
 # The platform's configuration API reads the daily cost of the resource group
 # of the nodes for the return on investment report, so the deployment assigns
 # Cost Management Reader on that resource group to the identity of the
@@ -639,14 +637,13 @@ $script:RequiredSubRoles = @(
 # Install-NeologikEnvironment.ps1 assigns the same role with the same condition.
 $script:LimitedSubRole = 'Role Based Access Control Administrator'
 $script:LimitedSubRoleId = 'f58310d9-a9f6-439a-9e8d-f62e7b41a168'
-# Reader, AppGw for Containers Configuration Manager, then Cost Management Reader.
+# Reader, then Cost Management Reader.
 $script:LimitedSubRoleAssignableIds = @(
     'acdd72a7-3385-48ef-bd42-f606fba81ae7',
-    'fbc52c3f-28ad-4303-a892-8a056630b8f1',
     '72fafb9e-0641-4937-9268-a91bfd8191a3'
 )
 $script:LimitedSubRoleConditionVersion = '2.0'
-$script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}}))" -f ($script:LimitedSubRoleAssignableIds -join ', '))
+$script:LimitedSubRoleCondition = ("((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}} AND @Request[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}} AND @Resource[Microsoft.Authorization/roleAssignments:PrincipalType] ForAnyOfAnyValues:StringEqualsIgnoreCase {{'ServicePrincipal'}}))" -f ($script:LimitedSubRoleAssignableIds -join ', '))
 
 # The roles on the subscription that step 6 removes.
 # Step 6 removes the roles only when the deployment identity holds the roles above.
@@ -777,7 +774,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.13'
+$script:ScriptVersion = '1.2.0'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that

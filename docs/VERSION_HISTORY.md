@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.2.0](#version-120)
 2. [Version 1.1.13](#version-1113)
 2. [Version 1.1.12](#version-1112)
 2. [Version 1.1.11](#version-1111)
@@ -37,7 +38,17 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.13 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.2.0 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.2.0
+
+**Date**: 2026-11-10
+
+This version applies to an environment on Neologik Platform version 5.0, version 5.1 or version 5.2.
+
+| Item | Change |
+|---|---|
+| The pre migration script and the post migration script, the limited role on the subscription | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
 
 ## Version 1.1.13
 
