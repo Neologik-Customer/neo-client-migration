@@ -2773,12 +2773,13 @@ Context 'The post migration script: permission reduction (step 6)' {
         $limited[0].Condition | Should -Not -Match 'fbc52c3f-28ad-4303-a892-8a056630b8f1'
     }
 
-    It 'in the post migration script replaces a limited assignment that carries the two-role condition with the three-role condition' {
+    It 'in the post migration script replaces a limited assignment that carries the three-role condition of version 1.1.14 with the current condition' {
         Add-CompliantPreWindowState
-        $twoRole = $script:LimitedSubRoleCondition -replace ', 72fafb9e-0641-4937-9268-a91bfd8191a3', ''
-        $twoRole | Should -Not -Be $script:LimitedSubRoleCondition
+        $threeRoleIds = 'acdd72a7-3385-48ef-bd42-f606fba81ae7, fbc52c3f-28ad-4303-a892-8a056630b8f1, 72fafb9e-0641-4937-9268-a91bfd8191a3'
+        $threeRole = "((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/write'}})) OR (@Request[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}})) AND ((!(ActionMatches{{'Microsoft.Authorization/roleAssignments/delete'}})) OR (@Resource[Microsoft.Authorization/roleAssignments:RoleDefinitionId] ForAnyOfAnyValues:GuidEquals {{{0}}}))" -f $threeRoleIds
+        $threeRole | Should -Not -Be $script:LimitedSubRoleCondition
         foreach ($entry in $script:Tenant.AzRoleAssignments) {
-            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Condition = $twoRole }
+            if ($entry.RoleDefinitionName -eq $script:LimitedSubRole -and $entry.Scope -eq $script:SubScope) { $entry.Condition = $threeRole }
         }
         $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
