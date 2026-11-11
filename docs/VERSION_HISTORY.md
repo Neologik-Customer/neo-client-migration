@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.15](#version-1115)
 2. [Version 1.1.14](#version-1114)
 2. [Version 1.1.13](#version-1113)
 2. [Version 1.1.12](#version-1112)
@@ -38,7 +39,18 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.14 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.15 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.15
+
+**Date**: 2026-11-11
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| The limited role on the subscription | The condition on Role Based Access Control Administrator on the subscription lets the deployment identity assign or remove two roles, Reader and Cost Management Reader, for service principals only. AppGw for Containers Configuration Manager leaves the list, because the deployment assigns that role inside the resource group of the environment. The pre migration script grants the role with this condition when the role is absent. The post migration script replaces an assignment that carries an earlier condition |
+| The guide and the technical breakdown | `docs/MIGRATION-SCRIPT-GUIDE.md` and `docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` describe the two roles |
 
 ## Version 1.1.14
 
