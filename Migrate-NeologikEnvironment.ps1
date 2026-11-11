@@ -69,11 +69,11 @@
       The script confirms the four security groups in this tenant:
         - 'Neologik User Group - <short name>'
         - 'Neologik NCE Contributors - <short name>', the user group of the
-          Neologik Context Engine. The script renames
+          Neologik Admin Tool. The script renames
           'Neologik NCE User Group - <short name>'. The group keeps the id and
           the members.
         - 'Neologik NCE Admins - <short name>', the administrators of the
-          Neologik Context Engine.
+          Neologik Admin Tool.
         - 'Neologik Admin User Group - <short name>'
       The command can name three of the groups by id: -UserGroupId,
       -NceUserGroupId and -AdminGroupId. The id decides, whatever the name. A
@@ -88,10 +88,10 @@
       every group, and adds a membership that is absent. The script removes no
       member.
 
-    Step 3. The role groups of the Neologik Context Engine.
+    Step 3. The role groups of the Neologik Admin Tool.
       The script assigns the user group that -NceUserGroupId names, and the
       group 'Neologik NCE Admins', to the enterprise application 'Neologik
-      Platform Sign-in'. The Neologik Context Engine reads the groups claim of
+      Platform Sign-in'. The Neologik Admin Tool reads the groups claim of
       the sign-in token to authorise a user. The groups claim lists only the
       groups that are assigned to the enterprise application.
 
@@ -1866,7 +1866,7 @@ function Write-NeologikHeader {
     if ($state.SharePointAppClientId) { $lines += "  SharePoint application:                     $($state.SharePointAppClientId)" }
     if ($state.BotAppClientIds.Count -gt 0) { $lines += "  Agent registrations:                        $($state.BotAppClientIds -join ', ')" }
     if ($state.UserGroupId) { $lines += "  Neologik User Group:                        $($state.UserGroupId)" }
-    if ($state.NceUserGroupId) { $lines += "  User group of the Neologik Context Engine:  $($state.NceUserGroupId)" }
+    if ($state.NceUserGroupId) { $lines += "  User group of the Neologik Admin Tool:  $($state.NceUserGroupId)" }
     if ($state.AdminGroupId) { $lines += "  Admin User Group:                           $($state.AdminGroupId)" }
     if ($state.ScriptRunnerObjectId) { $lines += "  Script runner identity:                     $($state.ScriptRunnerObjectId)" }
     $lines += "  SQL managed identity:                       $($state.SqlIdentityName)"
@@ -2644,9 +2644,9 @@ function Set-NeologikSecurityGroup {
     Step 2 of the pre migration script. The security groups of the Neologik
     Platform exist in this tenant, the Neologik support accounts are guests of the
     tenant, each guest and the signed-in administrator are members of every group,
-    and the two role groups of the Neologik Context Engine are known for step 3.
+    and the two role groups of the Neologik Admin Tool are known for step 3.
     The onboarding script does the same work for a new environment. This step
-    creates each group that is absent, renames the user group of the Neologik Context Engine
+    creates each group that is absent, renames the user group of the Neologik Admin Tool
     and fills the memberships. The step changes no group that already matches.
     #>
     $state = $script:State
@@ -2657,7 +2657,7 @@ function Set-NeologikSecurityGroup {
         @{ Key = 'UserGroup'; Name = "Neologik User Group$suffix"
            Description = 'Default Neologik users group - assign to agent channels created in the NCE'; PreviousNames = @(); GivenId = $state.UserGroupId },
         @{ Key = 'Contributors'; Name = "Neologik NCE Contributors$suffix"
-           Description = 'NCE contributor role - create and change platform configuration in the Neologik Context Engine'
+           Description = 'NCE contributor role - create and change platform configuration in the Neologik Admin Tool'
            PreviousNames = @("Neologik NCE User Group$suffix", "Neologik Harness User Group$suffix"); GivenId = $state.NceUserGroupId },
         @{ Key = 'Admins'; Name = "Neologik NCE Admins$suffix"
            Description = 'NCE admin role - full access including Blueprints, Audit and the Admin page'; PreviousNames = @(); GivenId = '' },
@@ -2782,7 +2782,7 @@ function Set-NeologikSecurityGroup {
     if ($failed.Count -gt 0) { $parts += "FAILED: $($failed -join '; ')" }
     Add-Summary 'Security groups' ($parts -join '. ')
 
-    # The two role groups of the Neologik Context Engine, for step 3 and for the
+    # The two role groups of the Neologik Admin Tool, for step 3 and for the
     # summary file. The Admin User Group, for the permission reduction. The user
     # group, for the snapshot and the summary file.
     if ($groups.ContainsKey('Contributors')) {
@@ -2851,7 +2851,7 @@ function Set-NeologikSecurityGroup {
 
     # ----- the memberships --------------------------------------------------------
     # Each guest and the signed-in administrator are direct members of every group.
-    # The Neologik Context Engine reads direct memberships only.
+    # The Neologik Admin Tool reads direct memberships only.
     # An account appears once in the list. The signed-in administrator who is also a
     # listed guest is the administrator: a second add of the same account is refused.
     $signedIn = [string](Get-NeologikProperty $state 'SignedInObjectId' '')
@@ -2933,7 +2933,7 @@ function Set-NeologikSignInGroupAssignment {
     # Engine to the Platform Sign-in application, and the check of the administrator
     # consent.
     $state = $script:State
-    Write-Log 'The assignment of the role groups of the Neologik Context Engine to the Platform Sign-in application' -Level Info
+    Write-Log 'The assignment of the role groups of the Neologik Admin Tool to the Platform Sign-in application' -Level Info
     $adminsGroupId = [string](Get-NeologikProperty $state 'NceAdminsGroupId' '')
     if (-not $state.SignInAppClientId -or -not $state.NceUserGroupId) {
         Write-Log '  SKIPPED. The command gives no SignInAppClientId or no NceUserGroupId. The command from Neologik holds both values' -Level Warning
@@ -5730,7 +5730,7 @@ function Write-NeologikSummary {
             exitReason           = [string]$script:ExitReason
             deploymentGraphRoles = @($heldRoles)
             expectedGraphRoles   = @($script:RequiredGraphRoles)
-            # The user group and the two role groups of the Neologik Context Engine (pre migration
+            # The user group and the two role groups of the Neologik Admin Tool (pre migration
             # script). Neologik records the NCE Admins group for the environment.
             userGroupId          = [string](Get-NeologikProperty $state 'UserGroupId' '')
             nceContributorsGroupId = [string](Get-NeologikProperty $state 'NceContributorsGroupId' '')

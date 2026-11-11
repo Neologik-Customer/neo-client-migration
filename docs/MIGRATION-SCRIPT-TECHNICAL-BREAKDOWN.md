@@ -79,7 +79,7 @@ The sign-in requests delegated permissions only. A delegated permission works on
 | `AgentIdentityBlueprint.AddRemoveCreds.All` | Every run | The federated credentials of the agent identity blueprint |
 | `AgentIdentityBlueprintPrincipal.Create` | Every run | The service principal of the agent identity blueprint, when absent |
 | `GroupMember.ReadWrite.All` | The pre migration script and the post migration script | The pre migration script adds members to the security groups. The post migration script removes the deployment identity from groups |
-| `Group.ReadWrite.All` | The pre migration script | A security group that is absent, and the rename of the user group of the Neologik Context Engine |
+| `Group.ReadWrite.All` | The pre migration script | A security group that is absent, and the rename of the user group of the Neologik Admin Tool |
 | `User.Invite.All` | The pre migration script | The invitation of a Neologik support account that is not yet a guest |
 | `AgentIdentityBlueprintPrincipal.ReadWrite.All` | The pre migration script | The owner of a service principal of the agent identity blueprint that has none |
 | `RoleManagement.ReadWrite.Directory` | Every run | The directory role Directory Readers of the SQL managed identity, when absent. The post migration script also removes directory roles from the deployment identity |
