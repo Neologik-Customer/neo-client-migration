@@ -186,7 +186,7 @@ BeforeAll {
             SqlServers            = @()
             # the resource group's tags (the kit version tag lives here).
             ResourceGroupTags     = @{}
-            # the directory managed identity on the resource group, when the identity exists.
+            # the agent registration identity on the resource group, when the identity exists.
             DirectoryIdentity     = $null
             # the status with which Azure refuses the creation of the managed identity.
             DirectoryIdentityCreateStatus = 0
@@ -349,7 +349,7 @@ BeforeAll {
     }
 
     function Add-CompliantDirectoryIdentity {
-        # The directory managed identity of step 5b, with the permission.
+        # The agent registration identity of step 5b, with the permission.
         $t = $script:Tenant
         $t.DirectoryIdentity = @{ principalId = $script:Ids.DirectorySpId; clientId = $script:Ids.DirectoryAppId }
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.DirectorySpId -AppId $script:Ids.DirectoryAppId -DisplayName $script:DirectoryIdentityName
@@ -2429,7 +2429,7 @@ Context 'Platform app ownership' {
         $code | Should -Be 1
         Get-SummaryResult "Registration 'ABC Chat Agent' owner" | Should -Be 'Already an owner'
         Get-SummaryResult "Agent registration $missingId" | Should -Match '^NOT FOUND: this tenant holds no application registration with this client id'
-        @($script:Writes | Where-Object { $_ -notmatch $script:Ids.DirectorySpId }) | Should -HaveCount 0 -Because 'only the directory managed identity becomes an owner'
+        @($script:Writes | Where-Object { $_ -notmatch $script:Ids.DirectorySpId }) | Should -HaveCount 0 -Because 'only the agent registration identity becomes an owner'
         $bot.owners | Should -Contain $script:Ids.DirectorySpId
     }
 
@@ -3759,7 +3759,7 @@ Context 'Step 5a: the Azure quotas that the migration needs' {
     }
 }
 
-Context 'Steps 4c and 5b: the federated credential and the directory managed identity' {
+Context 'Steps 4c and 5b: the federated credential and the agent registration identity' {
     It 'creates the managed identity, grants the permission, adds the owners and adds the credential on a run that finds none' {
         Add-CompliantPreWindowState
         $script:Tenant.DirectoryIdentity = $null
@@ -3776,8 +3776,8 @@ Context 'Steps 4c and 5b: the federated credential and the directory managed ide
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); BotAppClientIds = @($botAppId) }
 
         $code | Should -Be 0
-        Get-SummaryResult 'Directory managed identity' | Should -Be "Created: $script:DirectoryIdentityName"
-        Get-SummaryResult 'Directory managed identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
+        Get-SummaryResult 'Agent registration identity' | Should -Be "Created: $script:DirectoryIdentityName"
+        Get-SummaryResult 'Agent registration identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
         Get-SummaryResult "Deployment identity credential: $script:DeploymentCredentialName" | Should -Be 'Added'
         (Get-FakeApp -Id $botApp.id).owners | Should -Contain $script:Ids.DirectorySpId
         (Get-FakeSp -Id $botSp.id).owners | Should -Contain $script:Ids.DirectorySpId
@@ -3810,7 +3810,7 @@ Context 'Steps 4c and 5b: the federated credential and the directory managed ide
         $script:Writes = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
-        Get-SummaryResult 'Directory managed identity' | Should -Be "Present: $script:DirectoryIdentityName"
+        Get-SummaryResult 'Agent registration identity' | Should -Be "Present: $script:DirectoryIdentityName"
         Get-SummaryResult "Deployment identity credential: $script:DeploymentCredentialName" | Should -Be 'Present'
         $script:Writes | Should -HaveCount 0
     }
@@ -3834,7 +3834,7 @@ Context 'Steps 4c and 5b: the federated credential and the directory managed ide
         (Get-FakeApp -Id $script:Ids.DeployAppObj).credentials = @()
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
         $code | Should -Be 1
-        Get-SummaryResult 'Directory managed identity' | Should -Match '^WOULD CREATE'
+        Get-SummaryResult 'Agent registration identity' | Should -Match '^WOULD CREATE'
         Get-SummaryResult "Deployment identity credential: $script:DeploymentCredentialName" | Should -Match '^WOULD ADD'
         $script:Writes | Should -HaveCount 0
     }
@@ -3846,7 +3846,7 @@ Context 'Steps 4c and 5b: the federated credential and the directory managed ide
         $script:Tenant.ResourceGroupTags = @{}
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
-        Get-SummaryResult 'Directory managed identity' | Should -Match 'FAILED: The signed-in account cannot create a managed identity.*Owner'
+        Get-SummaryResult 'Agent registration identity' | Should -Match 'FAILED: The signed-in account cannot create a managed identity.*Owner'
         Get-SummaryResult 'Onboarding kit version tag' | Should -Match '^SKIPPED'
         $script:Tenant.ResourceGroupTags.ContainsKey('NeologikOnboardingKit') | Should -BeFalse
     }
@@ -3858,8 +3858,8 @@ Context 'Steps 4c and 5b: the federated credential and the directory managed ide
         (Get-FakeApp -Id $script:Ids.DeployAppObj).credentials = @()
         $script:Tenant.ResourceGroupTags = @{}
         $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
-        Get-SummaryResult 'Directory managed identity' | Should -Be "Created: $script:DirectoryIdentityName"
-        Get-SummaryResult 'Directory managed identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
+        Get-SummaryResult 'Agent registration identity' | Should -Be "Created: $script:DirectoryIdentityName"
+        Get-SummaryResult 'Agent registration identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
         Get-SummaryResult "Deployment identity credential: $script:DeploymentCredentialName" | Should -Be 'Added'
         Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Set: $script:KitVersion"
     }
