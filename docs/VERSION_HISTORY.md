@@ -14,6 +14,7 @@ This document lists the versions of the Neologik migration package. For each ver
 
 1. [Scripts in this version](#scripts-in-this-version)
 2. [Version 1.2.0](#version-120)
+2. [Version 1.1.16](#version-1116)
 2. [Version 1.1.15](#version-1115)
 2. [Version 1.1.14](#version-1114)
 2. [Version 1.1.13](#version-1113)
@@ -51,6 +52,16 @@ This version applies to an environment on Neologik Platform version 5.0, version
 | Item | Change |
 |---|---|
 | The pre migration script and the post migration script, the limited role on the subscription | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
+
+## Version 1.1.16
+
+**Date**: 2026-11-11
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| The migration script and the guides | The messages, the summary and the guides call the managed identity that manages the sign-in registrations of Neologik agents the agent registration identity. The managed identity keeps the name that `-DirectoryIdentityName` gives, and no step of the migration script changes |
 
 ## Version 1.1.15
 
