@@ -89,21 +89,21 @@ The Neologik Platform uses four security groups in your tenant. The migration sc
 | Item | What the migration script checks | When the migration script changes the item |
 |---|---|---|
 | `Neologik User Group - <short name>` | The group exists | The migration script creates the group when the group is absent |
-| `Neologik NCE Contributors - <short name>` | The group exists under this name. The group is the user group of the Neologik Context Engine | The migration script renames `Neologik NCE User Group - <short name>` to this name. The group keeps the id and the members. The migration script creates the group when no group exists under either name |
-| `Neologik NCE Admins - <short name>` | The group exists. Members of the group administer the Neologik Context Engine | The migration script creates the group when the group is absent |
+| `Neologik NCE Contributors - <short name>` | The group exists under this name. The group is the user group of the Neologik Admin Tool | The migration script renames `Neologik NCE User Group - <short name>` to this name. The group keeps the id and the members. The migration script creates the group when no group exists under either name |
+| `Neologik NCE Admins - <short name>` | The group exists. Members of the group administer the Neologik Admin Tool | The migration script creates the group when the group is absent |
 | `Neologik Admin User Group - <short name>` | The group exists | The migration script creates the group when the group is absent |
 | The Neologik support accounts | Each mail address in `NeologikGuestUsers.txt` is a guest of your tenant | The migration script invites an account that is absent. Microsoft sends the invitation |
 | The memberships | Each guest and the signed-in administrator are direct members of every one of the four groups | The migration script adds a membership that is absent. The migration script removes no member |
 
-The command can name three of the groups by id: the user group, the user group of the Neologik Context Engine and the Admin User Group. When the command names a group by id, the id decides, whatever the name of the group. A group whose name begins `Neologik` gets the name in the table, and keeps the id and the members. For example, `Neologik User Group - abc-prd` becomes `Neologik User Group - abcprd01`. A group with a name of your own keeps the name. A user group with a name of your own stays as it is, and gains no member: the migration script then finds or creates `Neologik User Group - <short name>` by name. When the command names no id, the migration script finds the group by name.
+The command can name three of the groups by id: the user group, the user group of the Neologik Admin Tool and the Admin User Group. When the command names a group by id, the id decides, whatever the name of the group. A group whose name begins `Neologik` gets the name in the table, and keeps the id and the members. For example, `Neologik User Group - abc-prd` becomes `Neologik User Group - abcprd01`. A group with a name of your own keeps the name. A user group with a name of your own stays as it is, and gains no member: the migration script then finds or creates `Neologik User Group - <short name>` by name. When the command names no id, the migration script finds the group by name.
 
-The summary item `NCE Admins group` states the id of the group. Neologik records the id for the environment, so that members of the group hold the administrator role in the Neologik Context Engine.
+The summary item `NCE Admins group` states the id of the group. Neologik records the id for the environment, so that members of the group hold the administrator role in the Neologik Admin Tool.
 
 When `NeologikGuestUsers.txt` is not beside the migration script, the summary reports the item `Neologik guest users` as `SKIPPED`. Run the migration script from the folder of the migration package, or add `-GuestUsersFile <path>` to the command.
 
-### Step 3: The role groups of the Neologik Context Engine
+### Step 3: The role groups of the Neologik Admin Tool
 
-The Neologik Context Engine reads the groups claim of the sign-in token to authorise a user. The groups claim lists only the security groups that are assigned to the Platform Sign-in application. The migration script assigns the user group that the command names, and the group `Neologik NCE Admins - <short name>`, to the application `Neologik Platform Sign-in - <short name>`, when an assignment is absent.
+The Neologik Admin Tool reads the groups claim of the sign-in token to authorise a user. The groups claim lists only the security groups that are assigned to the Platform Sign-in application. The migration script assigns the user group that the command names, and the group `Neologik NCE Admins - <short name>`, to the application `Neologik Platform Sign-in - <short name>`, when an assignment is absent.
 
 A user must be a direct member of the security group. A member of a nested group cannot sign in. The migration script reports the number of direct members.
 
@@ -225,7 +225,7 @@ The migration script signs in to Microsoft Graph with your account. At the first
 | `AgentIdentityBlueprint.Create`<br>`AgentIdentityBlueprint.AddRemoveCreds.All`<br>`AgentIdentityBlueprintPrincipal.Create` | Every run | To create the agent identity blueprint, the service principal and the federated credentials when each is absent |
 | `RoleManagement.ReadWrite.Directory` | Every run | To assign the directory role Directory Readers to the SQL managed identity when the role is absent. In the post migration script, also to remove directory roles from the deployment identity |
 | `GroupMember.ReadWrite.All` | The pre migration script | To add the Neologik guest users and the signed-in administrator to the security groups |
-| `Group.ReadWrite.All` | The pre migration script | To create a security group that is absent, and to rename the user group of the Neologik Context Engine |
+| `Group.ReadWrite.All` | The pre migration script | To create a security group that is absent, and to rename the user group of the Neologik Admin Tool |
 | `User.Invite.All` | The pre migration script | To invite a Neologik support account that is not yet a guest of your tenant |
 | `AgentIdentityBlueprintPrincipal.ReadWrite.All` | The pre migration script | To add the deployment identity as an owner of the service principal of the agent identity blueprint. The migration script adds the owner when that service principal has none |
 | `GroupMember.ReadWrite.All` | The post migration script | To remove the deployment identity from groups |
@@ -257,7 +257,7 @@ The summary file holds these things:
 - the signed-in account
 - the time of the run
 - the Microsoft Graph application permissions that the deployment identity holds
-- the ids of the two role groups of the Neologik Context Engine, after the pre migration script
+- the ids of the two role groups of the Neologik Admin Tool, after the pre migration script
 - every item of the summary
 - the path of the log file, and the reason when the run stopped before its steps
 

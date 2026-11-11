@@ -25,13 +25,13 @@ This document has two readers.
 
 | Term | Meaning |
 |---|---|
-| Neologik Context Engine | The administration web application of the Neologik Platform. The web application shows the name **Neologik Admin Tool** on screen. Platform operators configure agents and Apps there |
+| Neologik Admin Tool | The administration web application of the Neologik Platform. Platform operators configure agents and Apps there |
 | Deployment identity | The service principal that Neologik signs in with to deploy the Neologik Platform into your resource group |
 | Directory managed identity | The managed identity that, from version 5.2 of the Neologik Platform, creates and changes the application registrations of Neologik agents from inside your environment |
 | Migration script | `Migrate-NeologikEnvironment.ps1` |
 | Onboarding kit | The set of scripts and documents that Neologik gives a new customer. The onboarding kit holds the grants script, `Grant-NeologikAgentAccess.ps1`, which this migration package does not hold |
 | Short name | The organisation code, the environment type and the environment index, joined together. An example is `abcprd01` |
-| Platform Sign-in application | The application registration that signs your users in to the Neologik Context Engine and to Apps |
+| Platform Sign-in application | The application registration that signs your users in to the Neologik Admin Tool and to Apps |
 | Agent identity blueprint | The Microsoft Entra Agent ID object that is the parent of each agent identity and each agent user account |
 
 ## What the migration package contains
