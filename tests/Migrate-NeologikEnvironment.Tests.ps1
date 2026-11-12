@@ -704,9 +704,9 @@ BeforeAll {
             '^/users$' {
                 $filter = Get-QueryValue -Query $query -Name '$filter'
                 $items = @()
-                if ($filter -match "^mail eq '(.+)' or userPrincipalName eq '(.+)'$") {
+                if ($filter -match "^mail eq '(.+)' or userPrincipalName eq '(.+)' or otherMails/any\(m:m eq '(.+)'\)$") {
                     $address = $Matches[1] -replace "''", "'"
-                    $items = @($t.Users | Where-Object { $_.mail -eq $address -or $_.userPrincipalName -eq $address } |
+                    $items = @($t.Users | Where-Object { $_.mail -eq $address -or $_.userPrincipalName -eq $address -or (@($_['otherMails']) -contains $address) } |
                         ForEach-Object { @{ id = $_.id; displayName = $_.displayName; userPrincipalName = $_.userPrincipalName; userType = $_.userType } })
                 }
                 return @{ StatusCode = 200; Headers = @{}; Body = (ConvertTo-FakePage -Items $items -Uri $Uri -Query $query) }
@@ -3297,6 +3297,18 @@ Context 'The pre migration script: security groups, guests and memberships (step
         $script:Writes | Should -Contain 'POST invitation second@neologik.ai'
         @($script:Writes | Where-Object { $_ -like 'POST group member *' }) | Should -HaveCount 4
         (Get-SummaryResult 'Neologik guest users') | Should -Be 'Present: 1. Invited: second@neologik.ai'
+    }
+
+    It 'finds a guest first invited under another address by the other mail addresses, and invites nobody' {
+        Add-CompliantPreWindowState
+        $guest = @($script:Tenant.Users | Where-Object { $_.id -eq $script:Ids.GuestUser })[0]
+        $guest.mail = 'support@earlier.example'
+        $guest.userPrincipalName = 'support_earlier.example#EXT#@contoso.onmicrosoft.com'
+        $guest.otherMails = @('support@neologik.ai', 'support@earlier.example')
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        @($script:Writes | Where-Object { $_ -like 'POST invitation *' }) | Should -HaveCount 0
+        (Get-SummaryResult 'Neologik guest users') | Should -Be 'Present: 1'
     }
 
     It 'requests the group and invitation scopes for the pre migration script' {

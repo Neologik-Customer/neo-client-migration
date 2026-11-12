@@ -2601,11 +2601,14 @@ function Get-NeologikGroupByName {
 }
 
 function Find-NeologikUserByEmail {
-    # Returns the account whose mail address or user principal name is the address,
-    # or $null. A guest account keeps the invited address in the mail property.
+    # Returns the account whose mail address, user principal name or other mail address
+    # is the address, or $null. A guest account keeps the invited address in the mail
+    # property. A guest first invited under another address keeps this address in
+    # otherMails, so the lookup also matches otherMails and the script does not invite
+    # that guest again.
     param([string]$Email)
     $safe = $Email -replace "'", "''"
-    $filter = [uri]::EscapeDataString("mail eq '$safe' or userPrincipalName eq '$safe'")
+    $filter = [uri]::EscapeDataString("mail eq '$safe' or userPrincipalName eq '$safe' or otherMails/any(m:m eq '$safe')")
     $items = @(Get-NeologikGraphCollection -Uri "$script:GraphV1/users?`$filter=$filter&`$select=id,displayName,userPrincipalName,userType")
     return (@($items) | Select-Object -First 1)
 }
