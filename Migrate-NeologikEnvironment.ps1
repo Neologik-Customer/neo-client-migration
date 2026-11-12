@@ -132,13 +132,6 @@
       The summary lists every other application registration whose name begins
       'Neologik'. The script does not change those application registrations.
 
-    Step 4c. The federated credential of the deployment identity.
-      The script adds one federated credential to the application registration of
-      the deployment identity. The Neologik deployment can then sign in as the
-      deployment identity with no stored secret. The federated credential accepts
-      only a Neologik deployment run that names this environment. The federated
-      credential adds no permission.
-
     Step 5. The Azure roles of the deployment identity.
       The script confirms that the deployment identity holds ten Azure roles:
       seven roles on the resource group and three roles on the subscription. The
@@ -151,20 +144,6 @@
       API of the platform, to service principals only, and no other role. The script assigns a role that is absent and removes nothing.
       When the limited role is already held without the limit, the pre migration script
       reports it and the post migration script applies the limit.
-
-    Step 5b. The agent registration identity.
-      The script creates one managed identity on the resource group, with the name
-      that -DirectoryIdentityName gives. The managed identity holds no Azure role.
-      The script grants the managed identity the Microsoft Graph application
-      permissions Application.ReadWrite.OwnedBy and AgentRegistration.ReadWrite.All.
-      The script adds the managed identity as an owner of each agent registration
-      that -BotAppClientIds names. The deployment identity already holds the first
-      permission and owns those application registrations. From version 5.2 of the
-      Neologik Platform, the managed identity does that work from inside your
-      environment, and uses the second permission to record each Neologik agent in
-      the agent registry of the Microsoft 365 admin center, with a named owner.
-      Nothing can sign in as the managed identity until a deployment by Neologik
-      adds the sign-in credential.
 
     Step 5c. The items of the onboarding kit that both runs confirm.
       After the post migration script the environment stands where an environment
@@ -195,9 +174,8 @@
     Step 6. Permission reduction, with -LaterRun.
       The script first confirms the two Microsoft Graph application permissions
       that the deployment identity keeps, and the ten Azure roles of step 5. The
-      script also confirms the federated credential of step 4c and the directory
-      managed identity of step 5b, and adds what is absent. The script removes
-      nothing unless the deployment identity holds all of the roles and permissions.
+      script removes nothing unless the deployment identity holds all of the roles
+      and permissions.
       The script then removes the wider access from the deployment identity.
         - Seven Microsoft Graph application permissions: Application.Read.All,
           AgentIdentityBlueprint.Create,
@@ -333,15 +311,6 @@
     The client id of the application registration of each agent that the Neologik
     Platform manages in this tenant. The script does not change an application
     registration that the parameter does not list.
-
-.PARAMETER DirectoryIdentityName
-    The name of the agent registration identity, which the script creates on the
-    resource group. Required. The command from Neologik gives the value.
-
-.PARAMETER EnvironmentName
-    The name of the environment in the Neologik deployment, for example abcprd. The
-    federated credential of the deployment identity accepts only a deployment run
-    that names this environment. Required. The command from Neologik gives the value.
 
 .PARAMETER SqlIdentityName
     The name of the SQL managed identity, for example
@@ -510,12 +479,6 @@ param(
     [string[]]$BotAppClientIds,
 
     [Parameter(Mandatory = $false)]
-    [string]$DirectoryIdentityName,
-
-    [Parameter(Mandatory = $false)]
-    [string]$EnvironmentName,
-
-    [Parameter(Mandatory = $false)]
     [string]$SqlIdentityName,
 
     [Parameter(Mandatory = $false)]
@@ -590,17 +553,6 @@ $script:PipelineRepositories = @(
     @{ Name = 'neo-env-config';     Id = '995441655' }
 )
 
-# The Neologik deployment organisation. The id never changes. The federated credential
-# of the deployment identity accepts a run from this organisation that names the
-# environment. GitHub writes the organisation's name in the subject in one of two forms,
-# so the expression holds a wildcard straight after the name and also checks the id.
-# Install-NeologikEnvironment.ps1 holds the same two values.
-$script:DeploymentOrganisationName = 'Neologik-AI'
-$script:DeploymentOrganisationId = '109681438'
-
-# The Microsoft Graph application permissions of the agent registration identity.
-# Install-NeologikEnvironment.ps1 grants the same permissions.
-$script:DirectoryIdentityGraphRoles = @('Application.ReadWrite.OwnedBy', 'AgentRegistration.ReadWrite.All')
 $script:ManagedIdentityApiVersion = '2023-01-31'
 
 # The seven roles of the deployment identity on the resource group.
@@ -777,7 +729,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.17'
+$script:ScriptVersion = '1.1.18'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -1664,7 +1616,7 @@ function Resolve-NeologikInput {
     param([hashtable]$Parameters)
     $state = $script:State
     foreach ($name in @('KitVersion', 'ConfigurationFile', 'TenantId', 'DeploySpClientId', 'SolutionShortName', 'SolutionName', 'SignInAppClientId', 'SharePointAppClientId',
-            'UserGroupId', 'NceUserGroupId', 'AdminGroupId', 'GuestUsersFile', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'ScriptRunnerObjectId', 'DirectoryIdentityName', 'EnvironmentName',
+            'UserGroupId', 'NceUserGroupId', 'AdminGroupId', 'GuestUsersFile', 'SubscriptionId', 'ResourceGroupName', 'BlueprintKey', 'ScriptRunnerObjectId',
             'SqlIdentityName', 'KeyVaultName')) {
         $state[$name] = ([string](Get-NeologikProperty $Parameters $name '')).Trim()
     }
@@ -1770,19 +1722,6 @@ function Resolve-NeologikInput {
         if (-not $required.Value) {
             throw [System.ArgumentException]::new("The command does not give $($required.Name). Add -$($required.Name) to the command, or add -ConfigurationFile.")
         }
-    }
-    # Both runs need these two values. The command from Neologik gives each value.
-    if (-not $state.DirectoryIdentityName) {
-        throw [System.ArgumentException]::new('The command does not give DirectoryIdentityName. DirectoryIdentityName is the name of the agent registration identity. Ask Neologik for the current command.')
-    }
-    if ($state.DirectoryIdentityName -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{2,127}$') {
-        throw [System.ArgumentException]::new("DirectoryIdentityName must be the name of a managed identity: 3 to 128 letters, digits, hyphens and underscores, starting with a letter or a digit. The value is '$($state.DirectoryIdentityName)'.")
-    }
-    if (-not $state.EnvironmentName) {
-        throw [System.ArgumentException]::new('The command does not give EnvironmentName. EnvironmentName is the name of the environment in the Neologik deployment. Ask Neologik for the current command.')
-    }
-    if ($state.EnvironmentName -notmatch '^[a-z0-9]{2,32}$') {
-        throw [System.ArgumentException]::new("EnvironmentName must be 2 to 32 lower-case letters and digits. The value is '$($state.EnvironmentName)'.")
     }
     # The two values of the kit standard. The command from Neologik gives each value.
     if (-not $state.SqlIdentityName) {
@@ -4336,174 +4275,6 @@ function Set-NeologikDeploymentAzureRole {
     return $narrowComplete
 }
 
-function Set-NeologikDeploymentCredential {
-    <#
-    Step 4c of the pre migration script, confirmed again by the post migration script:
-    the federated credential of the deployment identity. The credential accepts only a
-    Neologik deployment run that names this environment. The function adds the
-    credential when the credential is absent and changes nothing else. Returns $true
-    when the credential is in place.
-    #>
-    param([Parameter(Mandatory)][string]$StepLabel)
-    $state = $script:State
-    Write-Log $StepLabel -Level Info
-    $credName = "github-deployments-$($state.EnvironmentName)"
-    $item = "Deployment identity credential: $credName"
-    try {
-        $app = @(Get-NeologikGraphCollection -Uri "$($script:GraphV1)/applications?`$filter=appId eq '$($state.DeploySpClientId)'&`$select=id") | Select-Object -First 1
-        if (-not $app) {
-            Write-Log "  ${item}: this tenant holds no application registration with the client id $($state.DeploySpClientId)" -Level Error
-            Add-Summary $item 'NOT FOUND: this tenant holds no application registration for the deployment identity. Ask Neologik to confirm the client id'
-            return $false
-        }
-        $uri = "$($script:GraphBeta)/applications/$([string](Get-NeologikProperty $app 'id' ''))/federatedIdentityCredentials"
-        $names = @(@(Get-NeologikGraphCollection -Uri "${uri}?`$select=name") | ForEach-Object { [string](Get-NeologikProperty $_ 'name' '') })
-        if ($names -contains $credName) {
-            Write-Log "  ${item}: present" -Level Success
-            Add-Summary $item 'Present'
-            return $true
-        }
-        if (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange $item 'ADD'
-            return $false
-        }
-        $expression = "claims['sub'] matches 'repo:$($script:DeploymentOrganisationName)*:environment:$($state.EnvironmentName)' and claims['repository_owner_id'] eq '$($script:DeploymentOrganisationId)'"
-        $body = @{
-            name                     = $credName
-            issuer                   = 'https://token.actions.githubusercontent.com'
-            audiences                = @('api://AzureADTokenExchange')
-            description              = "Neologik deployment runs of the environment $($state.EnvironmentName) sign in as the deployment identity with no stored secret"
-            claimsMatchingExpression = @{ value = $expression; languageVersion = 1 }
-        } | ConvertTo-Json -Depth 5 -Compress
-        $null = Invoke-NeologikGraph -Method POST -Uri $uri -Body $body
-        Write-Log "  ${item}: added" -Level Success
-        Add-Summary $item 'Added'
-        return $true
-    }
-    catch {
-        $reason = Get-NeologikErrorText $_
-        if ($reason -match '(?i)already exist') {
-            Write-Log "  ${item}: present" -Level Success
-            Add-Summary $item 'Present'
-            return $true
-        }
-        Write-Log "  ${item}: FAILED. $reason" -Level Error
-        Add-Summary $item "FAILED: $reason"
-        return $false
-    }
-}
-
-function Get-NeologikDirectoryIdentityResource {
-    # Reads the agent registration identity from Azure Resource Manager. Returns $null when
-    # the managed identity is absent. Throws with Azure's message for any other answer.
-    param([Parameter(Mandatory)][string]$Path)
-    return (Get-NeologikArmResource -Path $Path)
-}
-
-function New-NeologikDirectoryIdentityResource {
-    # Creates the agent registration identity in the location of the resource group, with
-    # the tags of the resource group, because an Azure Policy can require those tags.
-    # Returns the managed identity.
-    param([Parameter(Mandatory)][string]$Path)
-    Assert-NeologikWriteAllowed -Description "PUT $Path"
-    $rg = Get-AzResourceGroup -Name $script:State.ResourceGroupName -ErrorAction Stop
-    $tags = @{}
-    $rgTags = Get-NeologikProperty $rg 'Tags' @{}
-    if ($rgTags) {
-        foreach ($key in @($rgTags.Keys)) { if ($key -ne 'NeologikOnboardingKit') { $tags[$key] = $rgTags[$key] } }
-    }
-    $payload = @{ location = [string](Get-NeologikProperty $rg 'Location' ''); tags = $tags } | ConvertTo-Json -Depth 5 -Compress
-    $response = Invoke-AzRestMethod -Method PUT -Path $Path -Payload $payload -ErrorAction Stop
-    $status = [int](Get-NeologikProperty $response 'StatusCode' 0)
-    $content = [string](Get-NeologikProperty $response 'Content' '')
-    if ($status -eq 403) {
-        throw "The signed-in account cannot create a managed identity on the resource group. Sign in as an Owner of the subscription, then run the script again"
-    }
-    if ($status -lt 200 -or $status -ge 300) { throw "Azure Resource Manager answered HTTP $status. $content" }
-    return ($content | ConvertFrom-Json)
-}
-
-function Set-NeologikDirectoryIdentity {
-    <#
-    Step 5b of the pre migration script, confirmed again by the post migration script: the
-    agent registration identity. The function creates the managed identity when the
-    managed identity is absent, grants the Microsoft Graph application permission and
-    adds the managed identity as an owner of each agent registration the command names.
-    The function needs the Azure session. Returns $true when every item is in place.
-    #>
-    param([Parameter(Mandatory)][string]$StepLabel)
-    $state = $script:State
-    $graph = $script:GraphV1
-    $item = 'Agent registration identity'
-    Write-Log $StepLabel -Level Info
-    $path = "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$($state.DirectoryIdentityName)?api-version=$($script:ManagedIdentityApiVersion)"
-    try {
-        $identity = Get-NeologikDirectoryIdentityResource -Path $path
-        if ($identity) {
-            Write-Log "  ${item} '$($state.DirectoryIdentityName)': present" -Level Success
-            Add-Summary $item "Present: $($state.DirectoryIdentityName)"
-        }
-        elseif (Test-NeologikVerifyOnly) {
-            Add-NeologikPendingChange $item "CREATE $($state.DirectoryIdentityName), then grant $($script:DirectoryIdentityGraphRoles -join ', ') and add the owner of each agent registration"
-            return $false
-        }
-        else {
-            $identity = New-NeologikDirectoryIdentityResource -Path $path
-            Write-Log "  ${item} '$($state.DirectoryIdentityName)': created" -Level Success
-            Add-Summary $item "Created: $($state.DirectoryIdentityName)"
-        }
-    }
-    catch {
-        $reason = Get-NeologikErrorText $_
-        Write-Log "  ${item}: FAILED. $reason" -Level Error
-        Add-Summary $item "FAILED: $reason"
-        return $false
-    }
-
-    $principalId = [string](Get-NeologikProperty (Get-NeologikProperty $identity 'properties') 'principalId' '')
-    # A new managed identity takes time to reach every server of Microsoft Entra ID.
-    try {
-        $null = Invoke-NeologikGraph -Method GET -Uri "$graph/servicePrincipals/${principalId}?`$select=id" -RetryNotFound -MaxAttempts 12
-    }
-    catch {
-        $reason = Get-NeologikErrorText $_
-        Write-Log "  ${item}: the service principal did not appear. $reason" -Level Error
-        Add-Summary "$item permission" "FAILED: the service principal of the managed identity did not appear. Run the script again. $reason"
-        return $false
-    }
-    $outcome = Grant-NeologikGraphAppRole -PrincipalId $principalId -Label $item -RoleNames $script:DirectoryIdentityGraphRoles
-
-    $state.OwnerWriteFailed = $false
-    foreach ($botId in $state.BotAppClientIds) {
-        $prefix = "Agent registration $botId"
-        try {
-            $app = @(Get-NeologikGraphCollection -Uri "$graph/applications?`$filter=appId eq '$botId'&`$select=id") | Select-Object -First 1
-            if (-not $app) {
-                Add-Summary "$prefix agent registration identity owner" 'Not present. The deployment adds the owner when the application registration exists'
-                continue
-            }
-            Set-NeologikDirectoryObjectOwner -Item "$prefix agent registration identity owner" -Uri "$graph/applications/$([string](Get-NeologikProperty $app 'id' ''))" -OwnerId $principalId
-            $principal = @(Get-NeologikGraphCollection -Uri "$graph/servicePrincipals?`$filter=appId eq '$botId'&`$select=id") | Select-Object -First 1
-            if ($principal) {
-                Set-NeologikDirectoryObjectOwner -Item "$prefix service principal agent registration identity owner" -Uri "$graph/servicePrincipals/$([string](Get-NeologikProperty $principal 'id' ''))" -OwnerId $principalId
-            }
-        }
-        catch {
-            $state.OwnerWriteFailed = $true
-            Add-Summary "$prefix agent registration identity owner" "FAILED: $(Get-NeologikErrorText $_)"
-        }
-    }
-    return ([bool]$outcome.Complete -and $outcome.Pending -eq 0 -and -not $state.OwnerWriteFailed)
-}
-
-# ----- The items of the onboarding kit that both runs confirm ------------------------------
-# After the post migration script the environment stands where a greenfield environment
-# onboarded with the current kit stands. The functions below confirm the items that the
-# kit creates for a new customer and that the steps above do not cover: the directory
-# role of the SQL managed identity, the resource providers and preview features, the
-# access model of the Key Vault, the settings and containers of the deployment storage
-# account, and, in the post migration script, the Azure roles of the Admin User Group.
-
 function Get-NeologikArmResource {
     # One resource from Azure Resource Manager, or $null when the resource is absent.
     # Throws with Azure's message for any other answer.
@@ -4988,14 +4759,9 @@ function Invoke-NeologikPermissionReduction {
     if ($state.AdminGroupId) { $reductionItems += Get-NeologikAdminGroupRoleItem }
     if (-not $state.AzureConnected) {
         foreach ($item in $reductionItems) { Add-Summary $item 'SKIPPED: the script did not confirm the Azure roles of the deployment identity' }
-        Add-Summary 'Agent registration identity' 'SKIPPED: the sign-in to Azure failed'
         foreach ($item in Get-NeologikKitStandardItem) { Add-Summary $item 'SKIPPED: the sign-in to Azure failed' }
         return
     }
-    # The two items that the Neologik Platform needs from version 5.2. Neither item
-    # changes the access of the deployment identity.
-    $credentialReady = Set-NeologikDeploymentCredential -StepLabel 'The federated credential of the deployment identity'
-    $identityReady = Set-NeologikDirectoryIdentity -StepLabel 'The agent registration identity'
     # The items of the onboarding kit that both runs confirm. None of them changes the
     # access of the deployment identity.
     $kitItemsReady = Set-NeologikKitStandardItem
@@ -5043,8 +4809,8 @@ function Invoke-NeologikPermissionReduction {
 
     # Step 6k: record the version of the onboarding kit, after every step above. The tag
     # tells the next deployment that the items of this version are in place.
-    if (($credentialReady -and $identityReady -and $kitItemsReady -and $adminGroupReady) -or (Test-NeologikVerifyOnly)) { Set-NeologikKitVersionTag -ResourceId $rgScope }
-    else { Add-Summary 'Onboarding kit version tag' 'SKIPPED: the federated credential, the agent registration identity or another item of the onboarding kit is not complete. Run the script again' }
+    if (($kitItemsReady -and $adminGroupReady) -or (Test-NeologikVerifyOnly)) { Set-NeologikKitVersionTag -ResourceId $rgScope }
+    else { Add-Summary 'Onboarding kit version tag' 'SKIPPED: an item of the onboarding kit is not complete. Run the script again' }
 }
 
 # ----- Snapshot, upload and the file list ------------------------------------------
@@ -5645,27 +5411,23 @@ function Invoke-NeologikPreWindowRun {
     Set-NeologikSignInGroupAssignment
     Test-NeologikPreWindowSharePointConsent
     Set-NeologikPlatformAppOwnership
-    $credentialReady = Set-NeologikDeploymentCredential -StepLabel 'The federated credential of the deployment identity'
     $held = Set-NeologikDeploymentAzureRole -StepLabel 'The Azure roles of the deployment identity'
-    $identityReady = $false
     $kitItemsReady = $false
     if ($state.AzureConnected) {
-        $identityReady = Set-NeologikDirectoryIdentity -StepLabel 'The agent registration identity'
         # The items of the onboarding kit that both runs confirm: the directory role of the
         # SQL managed identity, the resource providers and preview features, the Key Vault
         # access model and the deployment storage account.
         $kitItemsReady = Set-NeologikKitStandardItem
     }
     else {
-        Add-Summary 'Agent registration identity' 'SKIPPED: the sign-in to Azure failed'
         foreach ($item in Get-NeologikKitStandardItem) { Add-Summary $item 'SKIPPED: the sign-in to Azure failed' }
     }
-    if ($held -and (($credentialReady -and $identityReady -and $kitItemsReady) -or (Test-NeologikVerifyOnly))) {
+    if ($held -and ($kitItemsReady -or (Test-NeologikVerifyOnly))) {
         # The Neologik Platform reads the tag before an upgrade.
         Set-NeologikKitVersionTag -ResourceId "/subscriptions/$($state.SubscriptionId)/resourceGroups/$($state.ResourceGroupName)"
     }
     elseif ($held) {
-        Add-Summary 'Onboarding kit version tag' 'SKIPPED: the federated credential, the agent registration identity or another item of the onboarding kit is not complete. Run the script again'
+        Add-Summary 'Onboarding kit version tag' 'SKIPPED: an item of the onboarding kit is not complete. Run the script again'
     }
     # The quotas, read with the same Azure session, after the roles: a quota that is short
     # is settled with Microsoft before the migration.
@@ -5800,8 +5562,6 @@ function Invoke-NeologikEnvironmentMigration {
         [string]$SignInAppClientId,
         [string]$SharePointAppClientId,
         [string[]]$BotAppClientIds,
-        [string]$DirectoryIdentityName,
-        [string]$EnvironmentName,
         [string]$SqlIdentityName,
         [string]$KeyVaultName,
         [string]$UserGroupId,
@@ -5845,8 +5605,6 @@ function Invoke-NeologikEnvironmentMigration {
             SignInAppClientId       = $SignInAppClientId
             SharePointAppClientId   = $SharePointAppClientId
             BotAppClientIds         = @($BotAppClientIds)
-            DirectoryIdentityName   = $DirectoryIdentityName
-            EnvironmentName         = $EnvironmentName
             SqlIdentityName         = $SqlIdentityName
             KeyVaultName            = $KeyVaultName
             UserGroupId             = $UserGroupId

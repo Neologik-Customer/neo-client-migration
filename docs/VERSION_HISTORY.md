@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.18](#version-1118)
 2. [Version 1.1.17](#version-1117)
 2. [Version 1.1.16](#version-1116)
 2. [Version 1.1.15](#version-1115)
@@ -41,7 +42,18 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.17 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.18 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.18
+
+**Date**: 2026-11-12
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| The migration script | The pre migration script and the post migration script no longer add the federated credential `github-deployments-<environment name>` to the deployment identity, and no longer create the agent registration identity or grant the agent registration identity a Microsoft Graph application permission. The parameters `-DirectoryIdentityName` and `-EnvironmentName` are gone. The version tag `NeologikOnboardingKit` no longer waits for the two items |
+| The guides | The migration script guide and the technical breakdown no longer describe the two items |
 
 ## Version 1.1.17
 
