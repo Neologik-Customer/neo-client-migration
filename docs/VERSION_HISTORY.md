@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.17](#version-1117)
 2. [Version 1.1.16](#version-1116)
 2. [Version 1.1.15](#version-1115)
 2. [Version 1.1.14](#version-1114)
@@ -40,7 +41,18 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.16 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.17 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.17
+
+**Date**: 2026-11-12
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| The migration script | The pre migration script and the post migration script grant the agent registration identity a second Microsoft Graph application permission, `AgentRegistration.ReadWrite.All`, beside `Application.ReadWrite.OwnedBy`. From version 5.2 of the Neologik Platform, the agent registration identity uses the permission to record each Neologik agent in the agent registry of the Microsoft 365 admin center, with a named owner. A run on an environment that already holds the first permission grants only the second |
+| The guides | The migration script guide and the technical breakdown list the second permission |
 
 ## Version 1.1.16
 

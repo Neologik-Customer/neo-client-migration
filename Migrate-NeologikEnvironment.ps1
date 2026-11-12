@@ -156,12 +156,15 @@
       The script creates one managed identity on the resource group, with the name
       that -DirectoryIdentityName gives. The managed identity holds no Azure role.
       The script grants the managed identity the Microsoft Graph application
-      permission Application.ReadWrite.OwnedBy. The script adds the managed identity
-      as an owner of each agent registration that -BotAppClientIds names. The
-      deployment identity already holds that permission and owns those application
-      registrations. From version 5.2 of the Neologik Platform, the managed identity
-      does that work from inside your environment. Nothing can sign in as the managed
-      identity until a deployment by Neologik adds the sign-in credential.
+      permissions Application.ReadWrite.OwnedBy and AgentRegistration.ReadWrite.All.
+      The script adds the managed identity as an owner of each agent registration
+      that -BotAppClientIds names. The deployment identity already holds the first
+      permission and owns those application registrations. From version 5.2 of the
+      Neologik Platform, the managed identity does that work from inside your
+      environment, and uses the second permission to record each Neologik agent in
+      the agent registry of the Microsoft 365 admin center, with a named owner.
+      Nothing can sign in as the managed identity until a deployment by Neologik
+      adds the sign-in credential.
 
     Step 5c. The items of the onboarding kit that both runs confirm.
       After the post migration script the environment stands where an environment
@@ -595,9 +598,9 @@ $script:PipelineRepositories = @(
 $script:DeploymentOrganisationName = 'Neologik-AI'
 $script:DeploymentOrganisationId = '109681438'
 
-# The Microsoft Graph application permission of the agent registration identity.
-# Install-NeologikEnvironment.ps1 grants the same permission.
-$script:DirectoryIdentityGraphRoles = @('Application.ReadWrite.OwnedBy')
+# The Microsoft Graph application permissions of the agent registration identity.
+# Install-NeologikEnvironment.ps1 grants the same permissions.
+$script:DirectoryIdentityGraphRoles = @('Application.ReadWrite.OwnedBy', 'AgentRegistration.ReadWrite.All')
 $script:ManagedIdentityApiVersion = '2023-01-31'
 
 # The seven roles of the deployment identity on the resource group.
@@ -774,7 +777,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.1.16'
+$script:ScriptVersion = '1.1.17'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
