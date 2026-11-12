@@ -52,8 +52,10 @@ This version applies to an environment on Neologik Platform version 5.0 or versi
 
 | Item | Change |
 |---|---|
-| The migration script | The pre migration script and the post migration script no longer add the federated credential `github-deployments-<environment name>` to the deployment identity, and no longer create the agent registration identity or grant the agent registration identity a Microsoft Graph application permission. The parameters `-DirectoryIdentityName` and `-EnvironmentName` are gone. The version tag `NeologikOnboardingKit` no longer waits for the two items |
-| The guides | The migration script guide and the technical breakdown no longer describe the two items |
+| The agent registration identity | Step 5b grants the agent registration identity one Microsoft Graph application permission, `Application.ReadWrite.OwnedBy`. The migration script no longer grants `AgentRegistration.ReadWrite.All`. Step 5b still creates the agent registration identity and adds the agent registration identity as an owner of each agent registration that the command names |
+| The federated credential | The pre migration script and the post migration script no longer add the federated credential `github-deployments-<environment name>` to the deployment identity. The parameter `-EnvironmentName` is gone, so a command that still gives `-EnvironmentName` stops before the run starts. Ask Neologik for the current command |
+| The version tag | The tag `NeologikOnboardingKit` waits for the agent registration identity, for the items of step 5c and, in the post migration script, for the roles of the Admin User Group |
+| The guides | The migration script guide and the technical breakdown describe the one permission, and no longer describe the federated credential |
 
 ## Version 1.1.17
 

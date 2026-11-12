@@ -111,6 +111,7 @@ BeforeAll {
         SqlSpId          = 'dddddddd-5555-dddd-dddd-dddddddddddd'
         SqlAppId         = 'dddddddd-6666-dddd-dddd-dddddddddddd'
     }
+    $script:DirectoryIdentityName = 'neologik-directory-managed-identity-abcprd01'
     $script:SqlIdentityName = 'neologik-sql-managed-identity-abcprd01'
     $script:KeyVaultName = 'kvabcprd01'
     $script:DirectoryReadersTemplateId = '88d8e3e3-8f55-4a1e-953a-9b9898b8876b'
@@ -124,7 +125,7 @@ BeforeAll {
     foreach ($roleName in @('Application.ReadWrite.OwnedBy', 'AgentIdentityBlueprint.AddRemoveCreds.All', 'Application.Read.All',
             'AgentIdentityBlueprint.Create', 'AgentIdentityBlueprint.UpdateAuthProperties.All', 'AgentIdentityBlueprintPrincipal.Create',
             'AgentIdentity.Create.All', 'AgentIdUser.ReadWrite.All', 'Group.Create', 'AgentIdUser.ReadWrite.IdentityParentedBy',
-            'Sites.Selected', 'Sites.FullControl.All', 'User.Read.All', 'AgentRegistration.ReadWrite.All')) {
+            'Sites.Selected', 'Sites.FullControl.All', 'User.Read.All')) {
         $script:AppRoleIds[$roleName] = [guid]::NewGuid().ToString()
     }
 
@@ -289,7 +290,6 @@ BeforeAll {
         Add-FakeAppRole -SpId $script:Ids.BlueprintSpId -RoleName 'AgentIdUser.ReadWrite.IdentityParentedBy'
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'Application.ReadWrite.OwnedBy'
         Add-FakeAppRole -SpId $script:Ids.DeploySpId -RoleName 'AgentIdentityBlueprint.AddRemoveCreds.All'
-        (Get-FakeApp -Id $script:Ids.DeployAppObj).credentials = @($script:DeploymentCredentialName)
         $group = @($t.Groups | Where-Object { $_.id -eq $script:Ids.Group })[0]
         $group.appRoleAssignments = @(@{ Id = [guid]::NewGuid().ToString(); ResourceId = $script:Ids.SignInSpId; AppRoleId = '00000000-0000-0000-0000-000000000000' })
         # The security groups of version 5 (project#3127): the user group under its
@@ -342,6 +342,15 @@ BeforeAll {
         $t.DirectoryRoles += @{ Id = $script:Ids.AppAdminRole; RoleTemplateId = $script:AppAdminRoleTemplateId; members = @() }
         # an environment kept with this kit carries its version tag.
         $t.ResourceGroupTags = @{ NeologikOnboardingKit = $script:KitVersion }
+        Add-CompliantDirectoryIdentity
+    }
+
+    function Add-CompliantDirectoryIdentity {
+        # The agent registration identity of step 5b, with the one permission.
+        $t = $script:Tenant
+        $t.DirectoryIdentity = @{ principalId = $script:Ids.DirectorySpId; clientId = $script:Ids.DirectoryAppId }
+        $t.ServicePrincipals += New-FakeSp -Id $script:Ids.DirectorySpId -AppId $script:Ids.DirectoryAppId -DisplayName $script:DirectoryIdentityName
+        Add-FakeAppRole -SpId $script:Ids.DirectorySpId -RoleName 'Application.ReadWrite.OwnedBy'
     }
 
     function Add-LegacyAzureState {
@@ -805,6 +814,7 @@ BeforeAll {
         # test gives one.
         param([hashtable]$Parameters)
         if (-not $Parameters.ContainsKey('KitVersion')) { $Parameters = $Parameters + @{ KitVersion = $script:KitVersion } }
+        if (-not $Parameters.ContainsKey('DirectoryIdentityName')) { $Parameters = $Parameters + @{ DirectoryIdentityName = $script:DirectoryIdentityName } }
         if (-not $Parameters.ContainsKey('SqlIdentityName')) { $Parameters = $Parameters + @{ SqlIdentityName = $script:SqlIdentityName } }
         if (-not $Parameters.ContainsKey('KeyVaultName')) { $Parameters = $Parameters + @{ KeyVaultName = $script:KeyVaultName } }
         $output = @(Invoke-NeologikEnvironmentMigration @Parameters)
@@ -2415,8 +2425,8 @@ Context 'Platform app ownership' {
         $code | Should -Be 1
         Get-SummaryResult "Registration 'ABC Chat Agent' owner" | Should -Be 'Already an owner'
         Get-SummaryResult "Agent registration $missingId" | Should -Match '^NOT FOUND: this tenant holds no application registration with this client id'
-        @($script:Writes) | Should -HaveCount 0 -Because 'the deployment identity already owns the registration, and the script adds no other owner'
-        $bot.owners | Should -Not -Contain $script:Ids.DirectorySpId
+        @($script:Writes | Where-Object { $_ -notmatch $script:Ids.DirectorySpId }) | Should -HaveCount 0 -Because 'only the agent registration identity becomes an owner'
+        $bot.owners | Should -Contain $script:Ids.DirectorySpId
     }
 
     It 'records the adoption as pending in verify-only and writes nothing' {
@@ -3742,6 +3752,144 @@ Context 'Step 5a: the Azure quotas that the migration needs' {
         $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
         # The kit standard reads the managed identities, the providers, the Key Vault and the storage account in both runs (project#3848); the quota paths stay out of the post run.
         Should -Invoke Invoke-AzRestMethod -Times 0 -ParameterFilter { $Path -notmatch 'userAssignedIdentities|/providers/Microsoft\.Features/|^/subscriptions/[^/]+/providers/[^/?]+\?api-version=|Microsoft\.KeyVault/vaults|Microsoft\.Storage/storageAccounts' }
+    }
+}
+
+Context 'Step 5b: the agent registration identity' {
+    It 'creates the managed identity, grants the one permission and adds the owners on a run that finds none' {
+        Add-CompliantPreWindowState
+        $script:Tenant.DirectoryIdentity = $null
+        $script:Tenant.ServicePrincipals = @($script:Tenant.ServicePrincipals | Where-Object { $_.id -ne $script:Ids.DirectorySpId })
+        $botAppId = 'f0000000-0000-0000-0000-000000000001'
+        $botApp = New-FakeApp -Id 'f0000000-0000-0000-0000-000000000002' -AppId $botAppId -DisplayName 'Bot registration'
+        $botApp.owners = @($script:Ids.DeploySpId)
+        $script:Tenant.Apps += $botApp
+        $botSp = New-FakeSp -Id 'f0000000-0000-0000-0000-000000000003' -AppId $botAppId -DisplayName 'Bot registration'
+        $botSp.owners = @($script:Ids.DeploySpId)
+        $script:Tenant.ServicePrincipals += $botSp
+
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); BotAppClientIds = @($botAppId) }
+
+        $code | Should -Be 0
+        Get-SummaryResult 'Agent registration identity' | Should -Be "Created: $script:DirectoryIdentityName"
+        Get-SummaryResult 'Agent registration identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
+        (Get-FakeApp -Id $botApp.id).owners | Should -Contain $script:Ids.DirectorySpId
+        (Get-FakeSp -Id $botSp.id).owners | Should -Contain $script:Ids.DirectorySpId
+        $granted = @((Get-FakeSp -Id $script:Ids.DirectorySpId).appRoleAssignments | ForEach-Object { $_.AppRoleId })
+        $granted | Should -HaveCount 1 -Because 'the agent registration identity receives one Microsoft Graph application permission'
+        $granted | Should -Contain $script:AppRoleIds['Application.ReadWrite.OwnedBy']
+    }
+
+    It 'grants the agent registration identity only Application.ReadWrite.OwnedBy, and adds no federated credential to the deployment identity' {
+        $text = Get-Content -Raw $script:ScriptPath
+        $text | Should -Match ([regex]::Escape("`$script:DirectoryIdentityGraphRoles = @('Application.ReadWrite.OwnedBy')"))
+        $text | Should -Not -Match 'AgentRegistration\.ReadWrite\.All'
+        $text | Should -Not -Match 'github-deployments-'
+        $text | Should -Not -Match ([regex]::Escape(':environment:'))
+        (Get-Command $script:ScriptPath).Parameters.Keys | Should -Not -Contain 'EnvironmentName'
+        (Get-Command $script:ScriptPath).Parameters.Keys | Should -Contain 'DirectoryIdentityName'
+    }
+
+    It 'adds no federated credential to the deployment identity in either run' {
+        Add-CompliantPreWindowState
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        @((Get-FakeApp -Id $script:Ids.DeployAppObj).credentials) | Should -HaveCount 0
+        @($script:GraphCalls | Where-Object { $_ -match "^POST .*/applications/$($script:Ids.DeployAppObj)/federatedIdentityCredentials" }) | Should -HaveCount 0
+    }
+
+    It 'grants the managed identity no Azure role' {
+        Add-CompliantPreWindowState
+        $script:Tenant.DirectoryIdentity = $null
+        $script:Tenant.ServicePrincipals = @($script:Tenant.ServicePrincipals | Where-Object { $_.id -ne $script:Ids.DirectorySpId })
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.DirectorySpId }) | Should -HaveCount 0
+    }
+
+    It 'creates the managed identity in the location of the resource group with the tags of the resource group, leaving out the kit version tag' {
+        Add-CompliantPreWindowState
+        $script:Tenant.DirectoryIdentity = $null
+        $script:Tenant.ServicePrincipals = @($script:Tenant.ServicePrincipals | Where-Object { $_.id -ne $script:Ids.DirectorySpId })
+        $script:Tenant.ResourceGroupTags = @{ NeologikOnboardingKit = $script:KitVersion; CostCentre = '42' }
+        $null = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $payload = $script:DirectoryIdentityPayload | ConvertFrom-Json -AsHashtable
+        $payload.location | Should -Be 'uksouth'
+        $payload.tags.CostCentre | Should -Be '42'
+        $payload.tags.ContainsKey('NeologikOnboardingKit') | Should -BeFalse
+    }
+
+    It 'changes nothing on a second run' {
+        Add-CompliantPreWindowState
+        $script:Writes = @()
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 0
+        Get-SummaryResult 'Agent registration identity' | Should -Be "Present: $script:DirectoryIdentityName"
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'reports each change and writes nothing with -Verify' {
+        Add-CompliantPreWindowState
+        $script:Tenant.DirectoryIdentity = $null
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); Verify = $true }
+        $code | Should -Be 1
+        Get-SummaryResult 'Agent registration identity' | Should -Match '^WOULD CREATE'
+        Get-SummaryResult 'Agent registration identity' | Should -Match 'grant Application\.ReadWrite\.OwnedBy and add the owner'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'records no kit version tag, and needs attention, when the managed identity cannot be created' {
+        Add-CompliantPreWindowState
+        $script:Tenant.DirectoryIdentity = $null
+        $script:Tenant.DirectoryIdentityCreateStatus = 403
+        $script:Tenant.ResourceGroupTags = @{}
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult 'Agent registration identity' | Should -Match 'FAILED: The signed-in account cannot create a managed identity.*Owner'
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Match '^SKIPPED: the agent registration identity'
+        $script:Tenant.ResourceGroupTags.ContainsKey('NeologikOnboardingKit') | Should -BeFalse
+    }
+
+    It 'records no kit version tag in the post migration script when the managed identity cannot be created' {
+        Add-CompliantPreWindowState
+        $script:Tenant.DirectoryIdentity = $null
+        $script:Tenant.DirectoryIdentityCreateStatus = 403
+        $script:Tenant.ResourceGroupTags = @{}
+        $code = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Match '^SKIPPED: the agent registration identity'
+        $script:Tenant.ResourceGroupTags.ContainsKey('NeologikOnboardingKit') | Should -BeFalse
+    }
+
+    It 'makes the agent registration identity in the post migration script, for a customer who has only that run left' {
+        Add-CompliantPreWindowState
+        $script:Tenant.DirectoryIdentity = $null
+        $script:Tenant.ServicePrincipals = @($script:Tenant.ServicePrincipals | Where-Object { $_.id -ne $script:Ids.DirectorySpId })
+        $script:Tenant.ResourceGroupTags = @{}
+        $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        Get-SummaryResult 'Agent registration identity' | Should -Be "Created: $script:DirectoryIdentityName"
+        Get-SummaryResult 'Agent registration identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
+        Get-SummaryResult 'Onboarding kit version tag' | Should -Be "Set: $script:KitVersion"
+    }
+
+    It 'leaves the roles of the managed identity alone in the post migration script' {
+        Add-CompliantPreWindowState
+        $script:Tenant.AzRoleAssignments += @{ ObjectId = $script:Ids.DirectorySpId; RoleDefinitionName = 'Reader'; Scope = $script:RgScope }
+        $null = Invoke-Run @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+        @($script:Tenant.AzRoleAssignments | Where-Object { $_.ObjectId -eq $script:Ids.DirectorySpId }) | Should -HaveCount 1
+    }
+
+    It 'refuses a command without the name of the agent registration identity, and contacts nothing' {
+        $code = Invoke-NeologikEnvironmentMigration -KitVersion $script:KitVersion -ConfigurationFile (New-ConfigFile)
+        @($code)[-1] | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'does not give DirectoryIdentityName'
+        Should -Invoke Connect-MgGraph -Times 0
+    }
+
+    It 'refuses a malformed name of the agent registration identity' {
+        $code = Invoke-NeologikEnvironmentMigration -KitVersion $script:KitVersion -ConfigurationFile (New-ConfigFile) -DirectoryIdentityName 'bad name'
+        @($code)[-1] | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'DirectoryIdentityName must be'
+        Should -Invoke Connect-MgGraph -Times 0
     }
 }
 
