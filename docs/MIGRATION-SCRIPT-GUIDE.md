@@ -143,7 +143,7 @@ This step prepares your environment for version 5.2 of the Neologik Platform. Fr
 | Item | What the migration script does |
 |---|---|
 | The managed identity | Creates one managed identity on the resource group, with the name that the command gives. The managed identity holds no Azure role |
-| The permission | Grants the managed identity the Microsoft Graph application permission `Application.ReadWrite.OwnedBy`. That permission creates application registrations and changes only the application registrations that the managed identity owns |
+| The permissions | Grants the managed identity the Microsoft Graph application permissions `Application.ReadWrite.OwnedBy` and `AgentRegistration.ReadWrite.All`. The first permission creates application registrations and changes only the application registrations that the managed identity owns. From version 5.2 of the Neologik Platform, the second permission records each Neologik agent in the agent registry of the Microsoft 365 admin center, with a named owner |
 | The owner | Adds the managed identity as an owner of each agent registration that the command names, and of the service principal of each. The migration script changes no other application registration |
 
 The deployment identity already holds the same permission and owns the same application registrations. The migration script changes nothing that the deployment identity holds.

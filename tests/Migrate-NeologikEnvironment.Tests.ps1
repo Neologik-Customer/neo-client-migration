@@ -127,7 +127,7 @@ BeforeAll {
     foreach ($roleName in @('Application.ReadWrite.OwnedBy', 'AgentIdentityBlueprint.AddRemoveCreds.All', 'Application.Read.All',
             'AgentIdentityBlueprint.Create', 'AgentIdentityBlueprint.UpdateAuthProperties.All', 'AgentIdentityBlueprintPrincipal.Create',
             'AgentIdentity.Create.All', 'AgentIdUser.ReadWrite.All', 'Group.Create', 'AgentIdUser.ReadWrite.IdentityParentedBy',
-            'Sites.Selected', 'Sites.FullControl.All', 'User.Read.All')) {
+            'Sites.Selected', 'Sites.FullControl.All', 'User.Read.All', 'AgentRegistration.ReadWrite.All')) {
         $script:AppRoleIds[$roleName] = [guid]::NewGuid().ToString()
     }
 
@@ -349,11 +349,12 @@ BeforeAll {
     }
 
     function Add-CompliantDirectoryIdentity {
-        # The agent registration identity of step 5b, with the permission.
+        # The agent registration identity of step 5b, with both permissions.
         $t = $script:Tenant
         $t.DirectoryIdentity = @{ principalId = $script:Ids.DirectorySpId; clientId = $script:Ids.DirectoryAppId }
         $t.ServicePrincipals += New-FakeSp -Id $script:Ids.DirectorySpId -AppId $script:Ids.DirectoryAppId -DisplayName $script:DirectoryIdentityName
         Add-FakeAppRole -SpId $script:Ids.DirectorySpId -RoleName 'Application.ReadWrite.OwnedBy'
+        Add-FakeAppRole -SpId $script:Ids.DirectorySpId -RoleName 'AgentRegistration.ReadWrite.All'
     }
 
     function Add-LegacyAzureState {
@@ -3778,11 +3779,13 @@ Context 'Steps 4c and 5b: the federated credential and the agent registration id
         $code | Should -Be 0
         Get-SummaryResult 'Agent registration identity' | Should -Be "Created: $script:DirectoryIdentityName"
         Get-SummaryResult 'Agent registration identity permission: Application.ReadWrite.OwnedBy' | Should -Be 'Granted'
+        Get-SummaryResult 'Agent registration identity permission: AgentRegistration.ReadWrite.All' | Should -Be 'Granted'
         Get-SummaryResult "Deployment identity credential: $script:DeploymentCredentialName" | Should -Be 'Added'
         (Get-FakeApp -Id $botApp.id).owners | Should -Contain $script:Ids.DirectorySpId
         (Get-FakeSp -Id $botSp.id).owners | Should -Contain $script:Ids.DirectorySpId
         (Get-FakeApp -Id $script:Ids.DeployAppObj).credentials | Should -Contain $script:DeploymentCredentialName
         (Get-FakeSp -Id $script:Ids.DirectorySpId).appRoleAssignments.AppRoleId | Should -Contain $script:AppRoleIds['Application.ReadWrite.OwnedBy']
+        (Get-FakeSp -Id $script:Ids.DirectorySpId).appRoleAssignments.AppRoleId | Should -Contain $script:AppRoleIds['AgentRegistration.ReadWrite.All']
     }
 
     It 'grants the managed identity no Azure role' {
