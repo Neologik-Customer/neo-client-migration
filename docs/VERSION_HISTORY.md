@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.1.18](#version-1118)
 2. [Version 1.1.17](#version-1117)
 2. [Version 1.1.16](#version-1116)
 2. [Version 1.1.15](#version-1115)
@@ -41,7 +42,21 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.17 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.1.18 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.1.18
+
+**Date**: 2026-11-12
+
+This version applies to an environment on Neologik Platform version 5.0 or version 5.1.
+
+| Item | Change |
+|---|---|
+| The agent registration identity | Step 5b grants the agent registration identity one Microsoft Graph application permission, `Application.ReadWrite.OwnedBy`. The migration script no longer grants `AgentRegistration.ReadWrite.All`. Step 5b still creates the agent registration identity and adds the agent registration identity as an owner of each agent registration that the command names |
+| The federated credential | The pre migration script and the post migration script no longer add the federated credential `github-deployments-<environment name>` to the deployment identity. The parameter `-EnvironmentName` is gone, so a command that still gives `-EnvironmentName` stops before the run starts. Ask Neologik for the current command |
+| The Neologik guest users | Step 2 also finds a Neologik guest whose account holds the listed address among the account's other mail addresses, as an account first invited under another address does. The migration script no longer invites that guest again, with an email, on every run |
+| The version tag | The tag `NeologikOnboardingKit` waits for the agent registration identity, for the items of step 5c and, in the post migration script, for the roles of the Admin User Group |
+| The guides | The migration script guide and the technical breakdown describe the one permission, and no longer describe the federated credential |
 
 ## Version 1.1.17
 
