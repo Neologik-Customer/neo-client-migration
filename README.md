@@ -50,8 +50,8 @@ This document has two readers.
 
 | Run | When Neologik asks for the run | What the migration script does |
 |---|---|---|
-| The pre migration script | Before the environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Adds one federated credential to the deployment identity. Creates the agent registration identity. Removes nothing |
-| The post migration script | After Neologik has deployed and proven the environment | Reduces the access of the deployment identity to the roles that the deployment identity needs. Confirms the federated credential and the agent registration identity, and adds what is absent |
+| The pre migration script | Before the environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Creates the agent registration identity. Removes nothing |
+| The post migration script | After Neologik has deployed and proven the environment | Reduces the access of the deployment identity to the roles that the deployment identity needs. Confirms the agent registration identity, and adds what is absent |
 
 The pre migration script removes nothing. The deployment identity keeps the access it holds today until the post migration script. Between the two runs, Neologik can put right a failed pre migration script or a failed deployment with that access.
 
@@ -65,7 +65,7 @@ The grants for agents and Apps that work unattended in Microsoft 365 are not par
 | Workstation | A desktop and a browser, for the sign-in |
 | Microsoft Entra role | **Global Administrator** in your tenant |
 | Azure role | **Owner** on the subscription of the environment. The migration script assigns and, in the post migration script, removes Azure roles. The migration script also creates the agent registration identity on the resource group |
-| The command from Neologik | The command names your tenant, your subscription, your resource group and the application registrations of the environment. The command also names the environment, the agent registration identity and the version of the onboarding kit that the migration brings your environment to |
+| The command from Neologik | The command names your tenant, your subscription, your resource group and the application registrations of the environment. The command also names the agent registration identity and the version of the onboarding kit that the migration brings your environment to |
 
 The migration script installs the PowerShell modules that the run needs, for your user account, when the modules are missing.
 
