@@ -54,6 +54,7 @@ This version applies to an environment on Neologik Platform version 5.0, version
 | Item | Change |
 |---|---|
 | The pre migration script and the post migration script, the limited role on the subscription | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
+| The pre migration script and the post migration script, the PowerShell modules | Before the migration script loads a module that the migration script installed, the migration script checks the Authenticode signature of each file of the module, with the rules of the onboarding kit. When a file fails the check, the migration script removes each module that the migration script installed for the step, loads no module of the step and prints what to do. The guide and the technical breakdown describe the check |
 | The changes of version 1.1.18 | This version includes every change of version 1.1.18 |
 
 ## Version 1.1.18

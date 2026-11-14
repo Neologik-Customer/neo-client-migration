@@ -830,6 +830,8 @@ BeforeAll {
     Mock Get-NeologikLoadedModuleVersion { $null }
     Mock Install-NeologikModule { param($Name) $script:Installs += $Name }
     Mock Import-NeologikModule { param($Name, $RequiredVersion) $script:Imports += "$Name $RequiredVersion" }
+    # The signature check reads the modules of the workstation. Migrate-NeologikEnvironment.Signatures.Tests.ps1 tests the check.
+    Mock Assert-NeologikModuleSignature { }
     Mock Test-NeologikCommand { $true }
     Mock Invoke-NeologikAzureCli { @{ ExitCode = 0; Output = @('eyJ0b2tlbg') } }
     # every endpoint answers, and the script's own device code
@@ -1318,6 +1320,7 @@ Context 'Modules and sign-in' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 0
         $script:Installs | Should -Contain 'Microsoft.Graph.Groups'
+        Should -Invoke Assert-NeologikModuleSignature -Times 1 -Exactly -ParameterFilter { (@($Modules) | ForEach-Object { $_['Name'] }) -join ',' -eq 'Microsoft.Graph.Groups' }
         $script:Imports | Should -Contain 'Microsoft.Graph.Applications 2.38.0'
         $script:Imports | Should -Contain 'Microsoft.Graph.Groups 2.38.0'
     }
@@ -1352,6 +1355,43 @@ Context 'Modules and sign-in' {
         ($script:Console -join "`n") | Should -Match 'ACTION REQUIRED'
         ($script:Console -join "`n") | Should -Match 'Install-Module Microsoft.Graph.Authentication'
         Should -Invoke Connect-MgGraph -Times 0
+    }
+
+    It 'stops before any import and names no install command when a Graph module that the run installed fails the signature check' {
+        Mock Get-NeologikAvailableModuleVersion {
+            param($Name)
+            if ($Name -eq 'Microsoft.Graph.Groups' -and $script:Installs -notcontains $Name) { return @() }
+            @([version]'2.38.0')
+        }
+        Mock Assert-NeologikModuleSignature { throw 'A PowerShell module failed the signature check. The script removed each module that the script installed for this step.' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'ACTION REQUIRED'
+        $console | Should -Match 'failed the signature check'
+        $console | Should -Not -Match 'Install-Module Microsoft.Graph.Authentication'
+        $script:Imports | Should -HaveCount 0
+        Should -Invoke Connect-MgGraph -Times 0
+        Get-SummaryResult 'Run' | Should -Be 'FAILED: the Microsoft Graph modules did not load. Read the messages above'
+    }
+
+    It 'skips the Azure roles and imports no Az module when an Az module that the run installed fails the signature check' {
+        Add-CompliantPreWindowState
+        Mock Get-NeologikAvailableModuleVersion {
+            param($Name)
+            if ($Name -eq 'Az.Sql' -and $script:Installs -notcontains $Name) { return @() }
+            @([version]'2.38.0')
+        }
+        Mock Assert-NeologikModuleSignature { throw 'A PowerShell module failed the signature check. The script removed each module that the script installed for this step.' }
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
+        $code | Should -Be 1
+        Should -Invoke Assert-NeologikModuleSignature -Times 1 -Exactly -ParameterFilter { (@($Modules) | ForEach-Object { $_['Name'] }) -join ',' -eq 'Az.Sql' }
+        Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'SKIPPED: the Az modules are not available'
+        @($script:Imports | Where-Object { $_ -like 'Az.*' }) | Should -HaveCount 0
+        Should -Invoke Connect-AzAccount -Times 0
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'failed the signature check'
+        $console | Should -Not -Match 'Install-Module Az.Accounts'
     }
 
     It 'stops with ACTION REQUIRED when the Graph sign-in fails' {
