@@ -5909,8 +5909,15 @@ function Invoke-NeologikPreWindowRun {
         Add-Summary 'Onboarding kit version tag' 'SKIPPED: the agent registration identity or another item of the onboarding kit is not complete. Run the script again'
     }
     # The quotas, read with the same Azure session, after the roles: a quota that is short
-    # is settled with Microsoft before the migration.
-    Test-NeologikAzureQuota
+    # is settled with Microsoft before the migration. Without the Azure session the step
+    # reads nothing, so no Az command loads a module that the run did not sign in with,
+    # or a module that failed the signature check.
+    if ($state.AzureConnected) {
+        Test-NeologikAzureQuota
+    }
+    else {
+        Add-Summary 'Azure quotas' 'SKIPPED: the sign-in to Azure failed'
+    }
 }
 
 function Invoke-NeologikPostWindowRun {

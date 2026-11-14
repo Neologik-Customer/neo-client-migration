@@ -1387,6 +1387,8 @@ Context 'Modules and sign-in' {
         $code | Should -Be 1
         Should -Invoke Assert-NeologikModuleSignature -Times 1 -Exactly -ParameterFilter { (@($Modules) | ForEach-Object { $_['Name'] }) -join ',' -eq 'Az.Sql' }
         Get-SummaryResult 'Resource group role: Contributor' | Should -Be 'SKIPPED: the Az modules are not available'
+        # The quota step reads nothing without the Azure session, so no Az command loads a module.
+        Get-SummaryResult 'Azure quotas' | Should -Be 'SKIPPED: the sign-in to Azure failed'
         @($script:Imports | Where-Object { $_ -like 'Az.*' }) | Should -HaveCount 0
         Should -Invoke Connect-AzAccount -Times 0
         $console = $script:Console -join "`n"
