@@ -41,10 +41,12 @@ The grants for agents and Apps that work unattended in Microsoft 365 are not par
 
 The migration script installs the PowerShell modules that the run needs, for your user account, when the modules are missing: the Microsoft Graph modules and the Az modules.
 
+Before the migration script loads a module that the migration script installed, the migration script checks the Authenticode signature of each file of the module. [MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md](MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md#signature-check-of-the-powershell-modules) describes the check. When a file fails the check, the migration script removes each module that the migration script installed for the step, and loads no module of the step. The migration script then prints what to do.
+
 Before the migration script changes anything, the migration script confirms three facts.
 
 1. The workstation can reach each Microsoft address that the migration script uses.
-2. The PowerShell modules load.
+2. The PowerShell modules load. A module that the migration script installs passes the signature check first.
 3. The signed-in account holds an active Global Administrator role.
 
 Each run makes one more check before the run changes an Azure role. The signed-in account must hold Owner or User Access Administrator on the subscription. An account that holds only User Access Administrator cannot create the agent registration identity. The summary then reports that item as failed, and you run the migration script again as an Owner.
@@ -191,7 +193,7 @@ The migration script first confirms the two Microsoft Graph application permissi
 | Every other Azure role in the subscription | The role is outside the ten roles of step 5. The migration script keeps two roles below the resource group. The first is `Cognitive Services Content Understanding Contributor` on a resource in the resource group. The second is `Storage Blob Data Contributor` on the container `function-package` |
 | Every other directory role | The deployment identity holds the role |
 | Every other group membership | The deployment identity is a member |
-| Contributor on the subscription and on the resource group from the script runner identity. The script runner identity is the managed identity `neologik-script-runner-service-connection-<short name>`. The deployment runs scripts with that managed identity | The command names the identity with `-ScriptRunnerObjectId`, and the identity holds Reader and Key Vault Secrets Officer on the resource group. The migration script assigns those two roles first. The identity keeps Azure Bot Service Contributor Role on the resource group |
+| Contributor on the subscription and on the resource group from the script runner identity. The script runner identity is the managed identity `neologik-script-runner-service-connection-<short name>`. The deployment runs scripts with that managed identity | The command names the identity with `-ScriptRunnerObjectId`, and the identity holds Reader and Key Vault Secrets Officer on the resource group. The migration script assigns those two roles first. The post migration script keeps the identity's Azure Bot Service Contributor Role on the resource group. The Neologik Platform does not use that role. From version 5.2 of the Neologik Platform, the Neologik deployment removes the role, with no step for you |
 | Every role of the group `Neologik Admin User Group - <short name>` in the subscription beyond the thirteen roles of the onboarding kit. The onboarding kit gives the group thirteen roles on the resource group and no role on the subscription: Contributor, Azure Kubernetes Service Cluster Admin Role, Azure Kubernetes Service RBAC Cluster Admin, Key Vault Administrator, Key Vault Secrets Officer, Key Vault Certificates Officer, Storage Blob Data Owner, Storage Blob Data Contributor, Storage Table Data Contributor, Cognitive Services Data Reader, Cognitive Services OpenAI Contributor, Search Index Data Reader and Azure AI Developer | The command names the group with `-AdminGroupId`, and the group holds all thirteen roles on the resource group. The migration script assigns a missing role first. A role of the group outside the subscription is listed as `Review` and kept |
 | Every role assignment on the resource group whose identity is gone | The identity of the assignment is gone from Microsoft Entra ID. Such a role assignment grants nothing, and the Azure portal shows the role assignment as "Identity not found". The migration script confirms with Microsoft Entra ID that the identity is gone, then removes the role assignment. An assignment whose identity still exists is kept and reads `Review` in the summary |
 
@@ -209,6 +211,7 @@ Last, when those items and the roles of the Admin User Group are complete, the m
 - The migration script never grants access to an agent or an App. The grants script of the onboarding kit does that.
 - The migration script never sends anything to Neologik other than the files of the run, to a storage account of your environment. You send the files when the upload does not happen.
 - The migration script never stores your sign-in.
+- The migration script never loads a module that the migration script installed before the signature check of the module passes.
 
 ## What the sign-in asks you to approve
 

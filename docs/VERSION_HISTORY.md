@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.2.0](#version-120)
 2. [Version 1.1.18](#version-1118)
 2. [Version 1.1.17](#version-1117)
 2. [Version 1.1.16](#version-1116)
@@ -42,7 +43,20 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.1.18 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.2.0 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.2.0
+
+**Date**: 2026-11-10
+
+This version applies to an environment on Neologik Platform version 5.0, version 5.1 or version 5.2.
+
+| Item | Change |
+|---|---|
+| The pre migration script and the post migration script, the limited role on the subscription | Role Based Access Control Administrator on the subscription is limited to Reader and Cost Management Reader, for service principals only |
+| The pre migration script and the post migration script, the PowerShell modules | Before the migration script loads a module that the migration script installed, the migration script checks the Authenticode signature of each file of the module, with the rules of the onboarding kit. When a file fails the check, the migration script removes each module that the migration script installed for the step, loads no module of the step and prints what to do. The guide and the technical breakdown describe the check |
+| The pre migration script, the Azure quotas | When the run has no Azure session, step 5a reads nothing and reports the quotas as skipped, as the other Azure items do. No Az command then loads a module that failed the signature check |
+| The changes of version 1.1.18 | This version includes every change of version 1.1.18 |
 
 ## Version 1.1.18
 
