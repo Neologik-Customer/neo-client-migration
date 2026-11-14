@@ -41,10 +41,12 @@ The grants for agents and Apps that work unattended in Microsoft 365 are not par
 
 The migration script installs the PowerShell modules that the run needs, for your user account, when the modules are missing: the Microsoft Graph modules and the Az modules.
 
+Before the migration script loads a module that the migration script installed, the migration script checks the Authenticode signature of each file of the module. [MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md](MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md#signature-check-of-the-powershell-modules) describes the check. When a file fails the check, the migration script removes each module that the migration script installed for the step, and loads no module of the step. The migration script then prints what to do.
+
 Before the migration script changes anything, the migration script confirms three facts.
 
 1. The workstation can reach each Microsoft address that the migration script uses.
-2. The PowerShell modules load.
+2. The PowerShell modules load. A module that the migration script installs passes the signature check first.
 3. The signed-in account holds an active Global Administrator role.
 
 Each run makes one more check before the run changes an Azure role. The signed-in account must hold Owner or User Access Administrator on the subscription. An account that holds only User Access Administrator cannot create the agent registration identity. The summary then reports that item as failed, and you run the migration script again as an Owner.
@@ -209,6 +211,7 @@ Last, when those items and the roles of the Admin User Group are complete, the m
 - The migration script never grants access to an agent or an App. The grants script of the onboarding kit does that.
 - The migration script never sends anything to Neologik other than the files of the run, to a storage account of your environment. You send the files when the upload does not happen.
 - The migration script never stores your sign-in.
+- The migration script never loads a module that the migration script installed before the signature check of the module passes.
 
 ## What the sign-in asks you to approve
 

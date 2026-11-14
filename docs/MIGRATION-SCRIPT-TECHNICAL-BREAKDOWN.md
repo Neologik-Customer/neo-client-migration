@@ -115,13 +115,13 @@ The migration script checks each input before the first sign-in: each id is a GU
 
 | Step | Run | What happens |
 |---|---|---|
-| Checks | Pre and post migration scripts | Each Microsoft address answers. The PowerShell modules load. The sign-in to Microsoft Graph. The Global Administrator check. The read of the deployment identity and of the service principal of Microsoft Graph |
+| Checks | Pre and post migration scripts | Each Microsoft address answers. The PowerShell modules load. A module that the migration script installs passes the signature check first. The sign-in to Microsoft Graph. The Global Administrator check. The read of the deployment identity and of the service principal of Microsoft Graph |
 | 1 | Pre migration script | The agent identity blueprint, its service principal, the owners, the sponsor, the permission of the service principal, the three federated credentials. The two Microsoft Graph application permissions of the deployment identity |
 | 2 | Pre migration script | The four security groups, the Neologik guest users and the memberships |
 | 3 | Pre migration script | The assignment of the two role groups to the Platform Sign-in application |
 | 4 | Pre migration script | The administrator consent of the Platform Sign-in application (read only). The SharePoint consent. The ownership and the unique names of the application registrations that the command names |
 | 5 | Pre migration script | The sign-in to Azure. The ten Azure roles of the deployment identity. The tag `NeologikOnboardingKit` on the resource group |
-| 5a | Pre migration script | The Azure checks that the migration needs, in the region of the environment. The step checks that the region has the Flex Consumption plan. The step compares the vCPUs of the node pool family and of the region with the growth of the cluster. The step reads the regional Azure OpenAI quota of each model that the Foundry account lacks. Read only |
+| 5a | Pre migration script | The Azure checks that the migration needs, in the region of the environment. The step checks that the region has the Flex Consumption plan. The step compares the vCPUs of the node pool family and of the region with the growth of the cluster. The step reads the regional Azure OpenAI quota of each model that the Foundry account lacks. When the run has no Azure session, the step reads nothing and reports the quotas as skipped. Read only |
 | 5c | Pre and post migration scripts | The directory role Directory Readers of the SQL managed identity. The resource providers and preview features of `resource-providers.txt`. Azure role-based access control on the Key Vault. The settings and the containers of the deployment storage account |
 | 6 | Post migration script | The two Microsoft Graph application permissions, then the removal of seven other Microsoft Graph application permissions. The sign-in to Azure. The ten Azure roles. The removal of Contributor and User Access Administrator on the subscription. The removal of the directory role Application Administrator and of the membership of the Admin User Group. The removal of every other Azure role, directory role and group membership. The removal of every role assignment on the resource group whose identity is gone from Microsoft Entra ID. When the command names the script runner identity with `-ScriptRunnerObjectId`, Reader and Key Vault Secrets Officer on the resource group for that identity. Then the removal of Contributor on the subscription and on the resource group from that identity. The thirteen roles of the Admin User Group on the resource group, then the removal of every other role of the group in the subscription. The tag `NeologikOnboardingKit` |
 | 5b | Pre and post migration scripts | The agent registration identity, the Microsoft Graph application permission of the managed identity and the owners. The tag `NeologikOnboardingKit` waits for the agent registration identity, for the items of step 5c and, in the post migration script, for the roles of the Admin User Group |
@@ -189,9 +189,28 @@ The migration script writes the files to its own folder, else to the current fol
 
 | Change | Detail |
 |---|---|
-| PowerShell modules | The migration script installs `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Identity.DirectoryManagement`, `Az.Accounts`, `Az.Resources`, `Az.Sql` and `Az.Storage` from the PowerShell Gallery, for the user account only, when a module is absent |
+| PowerShell modules | The migration script installs `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Identity.DirectoryManagement`, `Az.Accounts`, `Az.Resources`, `Az.Sql` and `Az.Storage` from the PowerShell Gallery, for the user account only, when a module is absent. The migration script checks the signature of each module that the migration script installs, before the migration script loads the module. See [Signature check of the PowerShell modules](#signature-check-of-the-powershell-modules) |
+| Removal of a PowerShell module | When a file fails the signature check, the migration script removes each module that the migration script installed for the step. The migration script removes no other module |
 | Sessions | The migration script opens a Microsoft Graph session and an Azure session for the run. The migration script stores no token |
 | Files | The three files of the run, in the folder of the script. The migration script reads `NeologikGuestUsers.txt` and `resource-providers.txt` from that folder |
+
+### Signature check of the PowerShell modules
+
+Before the migration script loads a module that the migration script installed, the migration script checks the Authenticode signature of each file of the module. The migration script also checks each module that the manifest of such a module requires, at the version that the manifest names. The onboarding kit applies the same rules to the modules that the onboarding kit installs.
+
+| File | Check |
+|---|---|
+| A script file: `.ps1`, `.psm1`, `.psd1`, `.ps1xml` or `.cdxml` | A valid signature of Microsoft Corporation |
+| A library: `.dll` or `.exe` | A valid signature of any publisher. The Az modules and the Microsoft Graph modules include libraries that other publishers sign, for example Json.NET. A reference assembly with no signature passes, because .NET refuses to run the code of a reference assembly |
+| The manifest of a module whose only file is the manifest | The manifest passes with no signature when the manifest loads no code. The migration script checks each module that the manifest names |
+
+When a file fails the check, the migration script removes each module that the migration script installed for the step, and loads no module of the step. The log names each file that failed the check. The migration script then prints what to do. The instruction names no install command, because a module installed by hand would skip the check.
+
+| Modules of the step | When a file fails the check |
+|---|---|
+| The Microsoft Graph modules, at the checks | The run stops before the sign-in to Microsoft Graph |
+| `Az.Accounts`, `Az.Resources` and `Az.Sql`, before the sign-in to Azure in step 5 or step 6 | The run makes no sign-in to Azure and no change in Azure. The summary reports each Azure role as `SKIPPED` |
+| `Az.Storage`, before the upload of the files of the run | The files of the run stay on the workstation, in the list `FILES TO SEND TO NEOLOGIK` |
 
 ## What the migration script never does
 
@@ -202,6 +221,7 @@ The migration script writes the files to its own folder, else to the current fol
 - The migration script never removes a wider role before the deployment identity holds every narrower role.
 - The migration script never grants access to an agent or an App. The grants script of the onboarding kit, `Grant-NeologikAgentAccess.ps1`, does that with the agent grants file and the mailbox grants file.
 - The migration script never signs in as a service principal and never stores a token.
+- The migration script never loads a module that the migration script installed before the signature check of the module passes.
 - With `-Verify`, the migration script writes nothing. Every write passes through one of two functions that refuse the write in a run with `-Verify`.
 
 ## What the log records
