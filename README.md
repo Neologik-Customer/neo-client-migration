@@ -29,7 +29,8 @@ This document has two readers.
 | Deployment identity | The service principal that Neologik signs in with to deploy the Neologik Platform into your resource group |
 | Agent registration identity | The managed identity that, from version 5.2 of the Neologik Platform, creates and changes the application registrations of Neologik agents from inside your environment |
 | Migration script | `Migrate-NeologikEnvironment.ps1` |
-| Onboarding kit | The set of scripts and documents that Neologik gives a new customer. The onboarding kit holds the grants script, `Grant-NeologikAgentAccess.ps1`, which this migration package does not hold |
+| Onboarding kit | The set of scripts and documents that Neologik gives a new customer |
+| Email channel | The channel through which a Neologik agent reads and answers a shared mailbox. An email channel reads the mailbox as an identity that holds Exchange Online role assignments limited to that mailbox |
 | Short name | The organisation code, the environment type and the environment index, joined together. An example is `abcprd01` |
 | Platform Sign-in application | The application registration that signs your users in to the Neologik Admin Tool and to Apps |
 | Agent identity blueprint | The Microsoft Entra Agent ID object that is the parent of each agent identity and each agent user account |
@@ -51,11 +52,16 @@ This document has two readers.
 | Run | When Neologik asks for the run | What the migration script does |
 |---|---|---|
 | The pre migration script | Before the environment moves to version 5 of the Neologik Platform | Confirms the directory objects that the Neologik Platform uses, and the roles and permissions that the deployment identity needs. Creates the agent registration identity. Removes nothing |
-| The post migration script | After Neologik has deployed and proven the environment | Reduces the access of the deployment identity to the roles that the deployment identity needs. Confirms the agent registration identity, and adds what is absent |
+| The post migration script | After Neologik has deployed and proven the environment | Reduces the access of the deployment identity to the roles that the deployment identity needs. Confirms the agent registration identity, and adds what is absent. Removes the Exchange Online role assignments of each identity of version 4 that the command names, and keeps each identity that an email channel uses |
 
 The pre migration script removes nothing. The deployment identity keeps the access it holds today until the post migration script. Between the two runs, Neologik can put right a failed pre migration script or a failed deployment with that access.
 
-The grants for agents and Apps that work unattended in Microsoft 365 are not part of the migration script. When an agent or an App of the migrated environment is to work unattended, a Global Administrator runs the grants script of the onboarding kit, `Grant-NeologikAgentAccess.ps1`, with the agent grants file and the mailbox grants file.
+The grants for agents and Apps that work unattended in Microsoft 365 are not part of the migration script. The source of the grants depends on the version of the Neologik Platform that the migration brings your environment to.
+
+| Version of the Neologik Platform | Where the grants come from |
+|---|---|
+| Version 5.2 or later | The grants list **Grants for your administrator** on the **Admin** page of the Neologik Admin Tool. Each grant for an agent or an App has its own row, with its own command and script |
+| Version 5.0 or version 5.1 | The grants script of the onboarding kit, `Grant-NeologikAgentAccess.ps1`, with the agent grants file and the mailbox grants file |
 
 ## Before you start
 
@@ -90,7 +96,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 The first command removes the mark that Windows puts on a downloaded file. Without it, PowerShell refuses the script with the words `not digitally signed`. The second command lifts the execution policy for the current PowerShell window only. If PowerShell still refuses a script with the words `not digitally signed`, the execution policy is set by Group Policy, which the command above cannot change. Run `Get-ExecutionPolicy -List`: a value other than `Undefined` on the `MachinePolicy` or `UserPolicy` row confirms it. An administrator of that policy allows `RemoteSigned` for the workstation, or you run the scripts from a workstation without the policy.
 
 4. Paste the command from Neologik and press Enter.
-5. The migration script opens the sign-in page in your browser. Sign in as a Global Administrator who also holds Owner on the subscription. The migration script then signs in to Azure with the same account. When the browser sign-in does not complete, the migration script prints a web address and a code to enter in a browser on any device.
+5. The migration script opens the sign-in page in your browser. Sign in as a Global Administrator who also holds Owner on the subscription. The migration script then signs in to Azure with the same account. When the command of the post migration script names identities of version 4, the migration script also signs in to Exchange Online with the same account. When the browser sign-in does not complete, the migration script prints a web address and a code to enter in a browser on any device.
 6. Read the summary table on screen and the list `FILES TO SEND TO NEOLOGIK` under it. Send the files to Neologik, unless the list says that the run uploaded them.
 
 To see what a run would change, add `-Verify` to the end of the command. The migration script reports each pending change as `WOULD` and writes nothing.
@@ -103,7 +109,7 @@ After the migration window of a Standard environment, Neologik sends the new pub
 
 Neologik tells you when the environment is proven. Neologik then sends the command of the post migration script. After the post migration script, the deployment identity holds the access that [MIGRATION-SCRIPT-GUIDE.md](docs/MIGRATION-SCRIPT-GUIDE.md) lists and nothing else.
 
-The migration package has no further use after the post migration script. The onboarding kit holds every script that a migrated environment needs later.
+The migration package has no further use after the post migration script. The onboarding kit and the Neologik Admin Tool hold every script that a migrated environment needs later.
 
 ## Help
 

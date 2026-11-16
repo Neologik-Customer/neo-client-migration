@@ -57,6 +57,13 @@ BeforeAll {
     function Get-AzStorageContainer { [CmdletBinding()] param($Name, $Context) }
     function New-AzStorageContainer { [CmdletBinding()] param($Name, $Context, $Permission) }
     function Set-AzStorageBlobContent { [CmdletBinding()] param($File, $Container, $Blob, $Context, [switch]$Force) }
+    # Exchange Online, for step 7 of the post migration script (project#2959).
+    function Connect-ExchangeOnline { [CmdletBinding()] param([switch]$Device, $ShowBanner, $UserPrincipalName) }
+    function Disconnect-ExchangeOnline { [CmdletBinding(SupportsShouldProcess)] param() }
+    function Get-ServicePrincipal { [CmdletBinding()] param($Identity) }
+    function Remove-ServicePrincipal { [CmdletBinding(SupportsShouldProcess)] param($Identity) }
+    function Get-ManagementRoleAssignment { [CmdletBinding()] param($Identity, $RoleAssignee) }
+    function Remove-ManagementRoleAssignment { [CmdletBinding(SupportsShouldProcess)] param($Identity) }
 
     # The script under test: dot-sourced, so its functions are defined here
     # and its guarded main entry does not run. The kit version comes from the
@@ -104,6 +111,8 @@ BeforeAll {
         MailboxObjectId  = 'dddddddd-2222-dddd-dddd-dddddddddddd'
         LegacyAppId      = 'eeeeeeee-1111-eeee-eeee-eeeeeeeeeeee'
         LegacyObjectId   = 'eeeeeeee-2222-eeee-eeee-eeeeeeeeeeee'
+        Legacy2AppId     = 'eeeeeeee-3333-eeee-eeee-eeeeeeeeeeee'
+        Legacy2ObjectId  = 'eeeeeeee-4444-eeee-eeee-eeeeeeeeeeee'
         SignInAppObj     = 'aaaaaaaa-5555-aaaa-aaaa-aaaaaaaaaaaa'
         DeployAppObj     = '33333333-cccc-3333-3333-333333333333'
         DirectorySpId    = 'dddddddd-3333-dddd-dddd-dddddddddddd'
@@ -216,6 +225,10 @@ BeforeAll {
             # The signed-in administrator: a
             # Global Administrator who owns the subscription.
             MeDirectoryRoles      = @(@{ id = 'role-ga'; displayName = 'Global Administrator'; roleTemplateId = '62e90394-69f5-4237-9190-012177145e10' })
+            # Exchange Online, for step 7 (project#2959): the Exchange service principals, the
+            # management scopes and the role assignments. RoleAssigneeUnsupported refuses
+            # -RoleAssignee, as some organisations do for a service principal.
+            Exchange              = @{ ServicePrincipals = @(); Scopes = @(); Assignments = @(); RoleAssigneeUnsupported = $false; RoleAssigneeReturnsAll = $false }
         }
         # Held at the root scope, which every subscription-scoped read inherits.
         $t.AzRoleAssignments += @{ ObjectId = $script:Ids.Me; RoleDefinitionName = 'Owner'; Scope = '/' }
@@ -1128,6 +1141,45 @@ BeforeAll {
         $script:Tenant.StaleAzRoleReads = [int]$script:Tenant.StaleAzRoleReadsAfterRemoval
         Add-Write "REMOVE az role $RoleDefinitionName $Scope"
     }
+    # Exchange Online, for step 7 (project#2959): answered from the model of the tenant. As the
+    # Microsoft page of each Get- cmdlet cautions, a value of -Identity that names no object
+    # returns every object, as if the command gave no -Identity.
+    Mock Connect-ExchangeOnline { $script:ExchangeConnected = $true }
+    Mock Disconnect-ExchangeOnline { $script:ExchangeDisconnected = $true }
+    Mock Get-ServicePrincipal {
+        param($Identity)
+        $all = @($script:Tenant.Exchange.ServicePrincipals)
+        $sp = @($all | Where-Object { $_.AppId -eq $Identity -or $_.ObjectId -eq $Identity -or $_.DisplayName -eq $Identity })
+        if ($sp.Count -eq 0) { $sp = $all }
+        @($sp | ForEach-Object { [pscustomobject]$_ })
+    }
+    Mock Remove-ServicePrincipal {
+        param($Identity)
+        if (-not $Identity) { throw 'Cannot bind argument to parameter Identity because it is an empty string' }
+        $script:Tenant.Exchange.ServicePrincipals = @($script:Tenant.Exchange.ServicePrincipals | Where-Object { $_.ObjectId -ne $Identity -and $_.AppId -ne $Identity })
+        Add-Write "REMOVE exo sp $Identity"
+    }
+    Mock Get-ManagementRoleAssignment {
+        param($Identity, $RoleAssignee)
+        $all = @($script:Tenant.Exchange.Assignments)
+        $assignments = $all
+        if ($Identity) {
+            $assignments = @($all | Where-Object { $_.Name -eq $Identity })
+            if ($assignments.Count -eq 0) { $assignments = $all }
+        }
+        if ($RoleAssignee) {
+            if ($script:Tenant.Exchange.RoleAssigneeUnsupported) { throw 'The RoleAssignee parameter does not accept service principals' }
+            # RoleAssigneeReturnsAll answers the read with every role assignment, the broadest
+            # answer that the read could give.
+            if (-not $script:Tenant.Exchange.RoleAssigneeReturnsAll) { $assignments = @($all | Where-Object { $_.RoleAssigneeName -eq $RoleAssignee }) }
+        }
+        @($assignments | ForEach-Object { [pscustomobject]$_ })
+    }
+    Mock Remove-ManagementRoleAssignment {
+        param($Identity)
+        $script:Tenant.Exchange.Assignments = @($script:Tenant.Exchange.Assignments | Where-Object { $_.Name -ne $Identity })
+        Add-Write "REMOVE exo assignment $Identity"
+    }
 }
 
 BeforeEach {
@@ -1145,6 +1197,8 @@ BeforeEach {
     $script:Desktop = $false
     $script:Connected = $false
     $script:AzConnected = $false
+    $script:ExchangeConnected = $false
+    $script:ExchangeDisconnected = $false
     $script:ContextTenant = $script:Ids.Tenant
     $script:ContextScopes = @()
     $script:AzContextSubscription = $script:Ids.Subscription
@@ -3093,10 +3147,14 @@ Context 'Parameter surface' {
         $names | Should -Contain 'KitVersion'
         $names | Should -Contain 'LaterRun'
         $names | Should -Contain 'UserGroupId'
-        # The grants are the work of Grant-NeologikAgentAccess.ps1 in the onboarding kit (project#3192).
+        # The grants of agents and Apps are not the work of the migration script: the grants list of the
+        # Neologik Admin Tool from v5.2, the grants script of the onboarding kit before (project#3192,
+        # project#2959). Step 7 of the post migration script takes its own two lists of identities.
         $names | Should -Not -Contain 'AgentGrantsFile'
         $names | Should -Not -Contain 'MailboxGrantsFile'
         $names | Should -Not -Contain 'RemoveLegacyGrantAppIds'
+        $names | Should -Contain 'LegacyMailboxIdentityClientIds'
+        $names | Should -Contain 'EmailChannelIdentityClientIds'
         { Invoke-NeologikEnvironmentMigration -ConfigurationFile (New-ConfigFile) -Phase 'PostWindow' } | Should -Throw -ExpectedMessage "*'Phase'*"
         Should -Invoke Connect-MgGraph -Times 0
     }
@@ -3104,11 +3162,13 @@ Context 'Parameter surface' {
 
 Context 'Summary and exit code' {
     It 'flags FAILED, UNKNOWN, MISSING, SKIPPED, PENDING, NOT FOUND and WOULD as attention' {
-        foreach ($result in @('FAILED - x', 'UNKNOWN - x', 'MISSING - x', 'SKIPPED - x', 'PENDING - x', 'NOT FOUND - x', 'WOULD GRANT', 'WOULD REMOVE: 2 role assignment(s)')) {
+        foreach ($result in @('FAILED - x', 'UNKNOWN - x', 'MISSING - x', 'SKIPPED - x', 'PENDING - x', 'NOT FOUND - x', 'WOULD GRANT', 'WOULD REMOVE: 2 role assignment(s)',
+                'WOULD REMOVE: 3 role assignment(s) and the Exchange service principal', 'SKIPPED: the sign-in to Exchange Online failed')) {
             $result | Should -Match $script:AttentionPattern
         }
         foreach ($result in @('Present', 'Created', 'Already granted', 'Granted: User.Read', 'Removed', 'Not held', 'Not present', 'Not needed', 'Updated: a b',
-                'Not checked. The post migration script with -AgentGrantsFile makes the check', 'Kept. An email channel still uses the identity')) {
+                'Not checked. The post migration script with -AgentGrantsFile makes the check', 'Kept. An email channel uses the identity',
+                'Removed: 3 role assignment(s) and the Exchange service principal')) {
             $result | Should -Not -Match $script:AttentionPattern
         }
     }
@@ -4413,6 +4473,298 @@ Context 'The post migration script: the Admin User Group roles (step 6j, project
         @($script:Writes | Where-Object { $_ -like "* $script:SubScope" -and $_ -like 'REMOVE*Monitoring Contributor*' }) | Should -HaveCount 0
         Get-SummaryResult 'Admin User Group roles' | Should -Be 'Not checked: the command does not name the Admin User Group'
         Get-AdminGroupRoles $script:SubScope | Should -Be @('Contributor', 'Cost Management Contributor', 'Monitoring Contributor')
+    }
+}
+
+Context 'The post migration script: the mailbox role assignments of the identities of version 4 (step 7, project#2959)' {
+    BeforeAll {
+        function Add-ExchangeIdentity {
+            # One identity in Exchange Online, as an email channel or a mailbox reader of version 4
+            # left it: the Exchange service principal, the management scope of the mailbox and one
+            # role assignment for each role, limited to that management scope.
+            param([string]$AppId, [string]$ObjectId, [string]$DisplayName, [string]$Mailbox = 'support@contoso.com',
+                [string[]]$Roles = @('Application Mail.Read', 'Application Mail.ReadWrite', 'Application Mail.Send'))
+            $x = $script:Tenant.Exchange
+            $x.ServicePrincipals += @{ Identity = $ObjectId; ObjectId = $ObjectId; AppId = $AppId; DisplayName = $DisplayName }
+            $x.Scopes += @{ Name = "Scope-$DisplayName"; RecipientFilter = "PrimarySmtpAddress -eq '$Mailbox'" }
+            # Exchange Online names the assignee of an application role assignment by the object id
+            # of the service principal, with the assignee type ServicePrincipal.
+            foreach ($role in $Roles) {
+                $x.Assignments += @{ Name = "Assignment-$DisplayName-$($role -replace '[^A-Za-z]', '')"; Role = $role; RoleAssigneeName = $ObjectId
+                    RoleAssigneeType = 'ServicePrincipal'; CustomResourceScope = "Scope-$DisplayName" }
+            }
+        }
+
+        function Get-ExchangeAssignment {
+            param([string]$ObjectId)
+            @($script:Tenant.Exchange.Assignments | Where-Object { $_.RoleAssigneeName -eq $ObjectId })
+        }
+
+        function Invoke-StepSevenRun {
+            # The post migration script with the identities of step 7.
+            param([string[]]$Legacy = @(), [string[]]$Channels = @(), [switch]$Verify)
+            $parameters = @{ LaterRun = $true; ConfigurationFile = (New-ConfigFile) }
+            if ($Legacy.Count -gt 0) { $parameters.LegacyMailboxIdentityClientIds = $Legacy }
+            if ($Channels.Count -gt 0) { $parameters.EmailChannelIdentityClientIds = $Channels }
+            if ($Verify) { $parameters.Verify = $true }
+            return (Invoke-Run $parameters)
+        }
+
+        # An access token that names the account admin@contoso.com, for the sign-in to Exchange
+        # Online with the account of the Microsoft Graph sign-in.
+        $claims = ConvertTo-NeologikBase64Url ([System.Text.Encoding]::UTF8.GetBytes('{"upn":"admin@contoso.com"}'))
+        $script:StepSevenJwt = "eyJhbGciOiJub25lIn0.$claims.sig"
+    }
+
+    BeforeEach {
+        # Every other item of the post migration script is in place, so the exit code reflects
+        # step 7 alone. The Exchange Online module is installed at a version above the minimum.
+        Add-CompliantPreWindowState
+        Mock Get-NeologikAvailableModuleVersion { param($Name) if ($Name -eq 'ExchangeOnlineManagement') { @([version]'3.10.0') } else { @([version]'2.38.0') } }
+    }
+
+    It 'removes the role assignments and the Exchange service principal of a named identity, and keeps the email channel identity and every management scope' {
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor'
+        Add-ExchangeIdentity -AppId $script:Ids.MailboxAppId -ObjectId $script:Ids.MailboxObjectId -DisplayName 'neo-support'
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId) -Channels @($script:Ids.MailboxAppId)
+        $code | Should -Be 0
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Removed: 3 role assignment(s) and the Exchange service principal'
+        Get-SummaryResult "Email channel identity: $($script:Ids.MailboxAppId)" | Should -Be 'Kept. An email channel uses the identity'
+        Get-ExchangeAssignment $script:Ids.LegacyObjectId | Should -HaveCount 0
+        Get-ExchangeAssignment $script:Ids.MailboxObjectId | Should -HaveCount 3
+        @($script:Tenant.Exchange.ServicePrincipals | ForEach-Object { $_.AppId }) | Should -Be @($script:Ids.MailboxAppId)
+        $script:Tenant.Exchange.Scopes | Should -HaveCount 2
+        # The rest of the post migration script changes nothing on this environment. The Exchange
+        # service principal goes after the last role assignment of the identity.
+        $script:Writes | Should -Be @(
+            'REMOVE exo assignment Assignment-email-monitor-ApplicationMailRead',
+            'REMOVE exo assignment Assignment-email-monitor-ApplicationMailReadWrite',
+            'REMOVE exo assignment Assignment-email-monitor-ApplicationMailSend',
+            "REMOVE exo sp $($script:Ids.LegacyObjectId)")
+        Should -Invoke Connect-ExchangeOnline -Times 1 -Exactly
+        $script:ExchangeDisconnected | Should -BeTrue
+        $console = $script:Console -join "`n"
+        $console | Should -Match ('Mailbox identities of version 4:\s+' + [regex]::Escape($script:Ids.LegacyAppId))
+        $console | Should -Match ('Email channel identities:\s+' + [regex]::Escape($script:Ids.MailboxAppId))
+        $console | Should -Match 'Step 7: the mailbox role assignments of the identities of version 4'
+        $console | Should -Match 'Exchange Online: reached'
+        $files = @(Get-ChildItem -Path (Join-Path $TestDrive 'summary') -Filter 'Neologik_EnvironmentMigration_PostWindow_*.json')
+        $files | Should -HaveCount 1
+        $json = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json
+        @($json.legacyMailboxIdentityClientIds) | Should -Be @($script:Ids.LegacyAppId)
+        @($json.emailChannelIdentityClientIds) | Should -Be @($script:Ids.MailboxAppId)
+
+        # A second run finds nothing left to remove.
+        $script:Writes = @()
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId) -Channels @($script:Ids.MailboxAppId)
+        $code | Should -Be 0
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Not present'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'keeps an identity that an email channel uses also when the command names the identity as an identity of version 4, and contacts no Exchange Online' {
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor'
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId) -Channels @($script:Ids.LegacyAppId.ToUpperInvariant())
+        $code | Should -Be 0
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Kept. An email channel uses the identity'
+        Get-SummaryResult "Email channel identity: $($script:Ids.LegacyAppId)" | Should -BeNullOrEmpty -Because 'the summary lists each identity of the command once'
+        ($script:Console -join "`n") | Should -Match 'an email channel uses the identity\. The script keeps the role assignments'
+        Get-ExchangeAssignment $script:Ids.LegacyObjectId | Should -HaveCount 3
+        $script:Writes | Should -HaveCount 0
+        Should -Invoke Connect-ExchangeOnline -Times 0 -Because 'nothing is left to remove'
+        Should -Invoke Test-NeologikEndpoint -Times 0 -ParameterFilter { $Uri -match 'outlook\.office365\.com' }
+        @($script:Imports | Where-Object { $_ -like 'ExchangeOnlineManagement*' }) | Should -HaveCount 0
+    }
+
+    It 'contacts no Exchange Online when the command names no identity of version 4' {
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor'
+        $code = Invoke-StepSevenRun -Channels @($script:Ids.MailboxAppId)
+        $code | Should -Be 0
+        @($script:Summary | Where-Object { $_.Item -like 'Mailbox role assignments*' -or $_.Item -like 'Email channel identity*' }) | Should -HaveCount 0
+        ($script:Console -join "`n") | Should -Match 'Step 7: the command names no identity of version 4\. The script does not contact Exchange Online'
+        Should -Invoke Connect-ExchangeOnline -Times 0
+        Should -Invoke Test-NeologikEndpoint -Times 0 -ParameterFilter { $Uri -match 'outlook\.office365\.com' }
+        Get-ExchangeAssignment $script:Ids.LegacyObjectId | Should -HaveCount 3
+    }
+
+    It 'with -Verify reports the pending removal, signs in the same way and writes nothing' {
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor'
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId) -Verify
+        $code | Should -Be 1
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)" | Should -Be 'WOULD REMOVE: 3 role assignment(s) and the Exchange service principal'
+        $script:Writes | Should -HaveCount 0
+        Get-ExchangeAssignment $script:Ids.LegacyObjectId | Should -HaveCount 3
+        $script:Tenant.Exchange.ServicePrincipals | Should -HaveCount 1
+        Should -Invoke Connect-ExchangeOnline -Times 1 -Exactly
+        Should -Invoke Remove-ManagementRoleAssignment -Times 0
+        Should -Invoke Remove-ServicePrincipal -Times 0
+    }
+
+    It 'reports an identity that Exchange Online does not know as not present, also when Exchange Online answers the read with an error' {
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 0
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Not present'
+        Mock Get-ServicePrincipal { param($Identity) throw "ManagementObjectNotFoundException: The operation couldn't be performed because object '$Identity' couldn't be found on 'AM0PR01A001.PROD.OUTLOOK.COM'." }
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 0
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Not present'
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'never takes the answer to an unknown identity, which names every service principal of the organisation, for that identity' {
+        # Exchange Online answers a value of -Identity that names no object with every object. The
+        # one Exchange service principal of the organisation is the identity of the email channel,
+        # which the command does not name: the answer must never reach a removal.
+        Add-ExchangeIdentity -AppId $script:Ids.MailboxAppId -ObjectId $script:Ids.MailboxObjectId -DisplayName 'neo-support'
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 0
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Not present'
+        Get-ExchangeAssignment $script:Ids.MailboxObjectId | Should -HaveCount 3
+        $script:Tenant.Exchange.ServicePrincipals | Should -HaveCount 1
+        $script:Writes | Should -HaveCount 0
+        Should -Invoke Get-ServicePrincipal -Times 1 -Exactly -ParameterFilter { $Identity -eq $script:Ids.LegacyAppId }
+    }
+
+    It 'removes only the role assignments of the identity when the read by assignee answers with more, and never one of a user with the same name' {
+        $script:Tenant.Exchange.RoleAssigneeReturnsAll = $true
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor'
+        Add-ExchangeIdentity -AppId $script:Ids.MailboxAppId -ObjectId $script:Ids.MailboxObjectId -DisplayName 'neo-support'
+        # A role group assignment of a user whose name is the display name of the identity.
+        $script:Tenant.Exchange.Assignments += @{ Name = 'Mail Recipients-email-monitor'; Role = 'Mail Recipients'; RoleAssigneeName = 'email-monitor'; RoleAssigneeType = 'User' }
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 0
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Removed: 3 role assignment(s) and the Exchange service principal'
+        Get-ExchangeAssignment $script:Ids.MailboxObjectId | Should -HaveCount 3
+        @($script:Tenant.Exchange.Assignments | Where-Object { $_.Name -eq 'Mail Recipients-email-monitor' }) | Should -HaveCount 1
+        @($script:Writes | Where-Object { $_ -like 'REMOVE exo assignment*' }) | Should -HaveCount 3
+    }
+
+    It 'reports FAILED when the read of the identity fails, and never takes the failure for an absent identity' {
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor'
+        Mock Get-ServicePrincipal { throw 'The user is not assigned to any management roles' }
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 1
+        (Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)") | Should -Match '^FAILED: The user is not assigned to any management roles'
+        $script:Writes | Should -HaveCount 0
+        Get-ExchangeAssignment $script:Ids.LegacyObjectId | Should -HaveCount 3
+        $script:ExchangeDisconnected | Should -BeTrue
+    }
+
+    It 'continues past a role assignment that Exchange Online refuses to remove, keeps that Exchange service principal and removes the next identity' {
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor'
+        Add-ExchangeIdentity -AppId $script:Ids.Legacy2AppId -ObjectId $script:Ids.Legacy2ObjectId -DisplayName 'news-reader' -Mailbox 'news@contoso.com'
+        Mock Remove-ManagementRoleAssignment {
+            param($Identity)
+            if ($Identity -eq 'Assignment-email-monitor-ApplicationMailReadWrite') { throw 'The operation could not be performed because the object is being changed' }
+            $script:Tenant.Exchange.Assignments = @($script:Tenant.Exchange.Assignments | Where-Object { $_.Name -ne $Identity })
+            Add-Write "REMOVE exo assignment $Identity"
+        }
+        # One element can hold several client ids, separated by commas.
+        $code = Invoke-StepSevenRun -Legacy @("$($script:Ids.LegacyAppId),$($script:Ids.Legacy2AppId)")
+        $code | Should -Be 1
+        (Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)") | Should -Be ('FAILED: the script removed 2 of 3 role assignment(s) and kept the Exchange service principal. Run the post migration script again. ' +
+            'Assignment-email-monitor-ApplicationMailReadWrite: The operation could not be performed because the object is being changed')
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.Legacy2AppId)" | Should -Be 'Removed: 3 role assignment(s) and the Exchange service principal'
+        @(Get-ExchangeAssignment $script:Ids.LegacyObjectId | ForEach-Object { $_.Name }) | Should -Be @('Assignment-email-monitor-ApplicationMailReadWrite')
+        @($script:Tenant.Exchange.ServicePrincipals | ForEach-Object { $_.AppId }) | Should -Be @($script:Ids.LegacyAppId)
+        Should -Invoke Remove-ServicePrincipal -Times 1 -Exactly
+        Should -Invoke Remove-ServicePrincipal -Times 1 -Exactly -ParameterFilter { $Identity -eq $script:Ids.Legacy2ObjectId }
+        $script:Tenant.Exchange.Scopes | Should -HaveCount 2
+    }
+
+    It 'finds the role assignments of the identity when Exchange Online refuses -RoleAssignee, and leaves every other role assignment' {
+        $script:Tenant.Exchange.RoleAssigneeUnsupported = $true
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor' -Roles @('Application Mail.Read')
+        Add-ExchangeIdentity -AppId $script:Ids.MailboxAppId -ObjectId $script:Ids.MailboxObjectId -DisplayName 'neo-support' -Roles @('Application Mail.Read')
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 0
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)" | Should -Be 'Removed: 1 role assignment(s) and the Exchange service principal'
+        Get-ExchangeAssignment $script:Ids.MailboxObjectId | Should -HaveCount 1
+        @($script:Tenant.Exchange.ServicePrincipals | ForEach-Object { $_.AppId }) | Should -Be @($script:Ids.MailboxAppId)
+    }
+
+    It 'skips each identity when the sign-in to Exchange Online fails, and the rest of the post migration script still runs' {
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor'
+        Mock Connect-ExchangeOnline { throw 'Device login timed out' }
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 1
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.LegacyAppId)" | Should -Be 'SKIPPED: the sign-in to Exchange Online failed'
+        Get-SummaryResult 'Subscription role: Reader' | Should -Be 'Already assigned'
+        Should -Invoke Disconnect-ExchangeOnline -Times 0
+        $console = $script:Console -join "`n"
+        $console | Should -Match 'ACTION REQUIRED'
+        $console | Should -Match 'The sign-in to Exchange Online did not complete'
+        Get-ExchangeAssignment $script:Ids.LegacyObjectId | Should -HaveCount 3
+    }
+
+    It 'signs in to Exchange Online in the browser first, with the account of the Microsoft Graph sign-in, then with a device code' {
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor'
+        $script:Desktop = $true
+        Mock Invoke-NeologikTokenRequest {
+            param($Uri, $Body)
+            if ($Uri -match '/devicecode$') {
+                return @{ StatusCode = 200; Body = @{ device_code = 'dc-1'; user_code = 'ABCD-EFGH'; verification_uri = 'https://microsoft.com/devicelogin'; expires_in = 900; interval = 5 } }
+            }
+            return @{ StatusCode = 200; Body = @{ access_token = $script:StepSevenJwt; refresh_token = 'rt-1' } }
+        }
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 0
+        Should -Invoke Connect-ExchangeOnline -Times 1 -Exactly -ParameterFilter { -not $Device -and $UserPrincipalName -eq 'admin@contoso.com' }
+        Should -Invoke Connect-ExchangeOnline -Times 0 -ParameterFilter { $Device }
+
+        Mock Connect-ExchangeOnline { param([switch]$Device) if (-not $Device) { throw 'The browser sign-in was cancelled' }; $script:ExchangeConnected = $true }
+        $script:Console = @()
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 0
+        Should -Invoke Connect-ExchangeOnline -Times 1 -Exactly -ParameterFilter { $Device }
+        ($script:Console -join "`n") | Should -Match 'The sign-in to Exchange Online in the browser did not complete\. The browser sign-in was cancelled\. The script tries a device code'
+    }
+
+    It 'installs the Exchange Online module when absent, and skips each identity when the module cannot be installed' {
+        Add-ExchangeIdentity -AppId $script:Ids.LegacyAppId -ObjectId $script:Ids.LegacyObjectId -DisplayName 'email-monitor'
+        Mock Get-NeologikAvailableModuleVersion {
+            param($Name)
+            if ($Name -ne 'ExchangeOnlineManagement') { return @([version]'2.38.0') }
+            if ($script:Installs -contains $Name) { return @([version]'3.10.0') }
+            return @()
+        }
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 0
+        $script:Installs | Should -Contain 'ExchangeOnlineManagement'
+        Should -Invoke Assert-NeologikModuleSignature -Times 1 -Exactly -ParameterFilter { (@($Modules) | ForEach-Object { $_['Name'] }) -join ',' -eq 'ExchangeOnlineManagement' }
+
+        Mock Install-NeologikModule { throw 'No match was found for the specified search criteria' }
+        $script:Installs = @()
+        Add-ExchangeIdentity -AppId $script:Ids.Legacy2AppId -ObjectId $script:Ids.Legacy2ObjectId -DisplayName 'news-reader'
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.Legacy2AppId)
+        $code | Should -Be 1
+        Get-SummaryResult "Mailbox role assignments to remove: $($script:Ids.Legacy2AppId)" | Should -Be 'SKIPPED: the Exchange Online module is not available'
+        Get-ExchangeAssignment $script:Ids.Legacy2ObjectId | Should -HaveCount 3
+        Should -Invoke Connect-ExchangeOnline -Times 1 -Exactly -Because 'only the first run had the module'
+    }
+
+    It 'checks the address of Exchange Online before any sign-in when step 7 removes a role assignment' {
+        Mock Test-NeologikEndpoint { param($Uri) $Uri -notmatch 'outlook\.office365\.com' }
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId)
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'Exchange Online: https://outlook.office365.com/'
+        Should -Invoke Connect-MgGraph -Times 0
+        $script:Writes | Should -HaveCount 0
+    }
+
+    It 'refuses an identity of version 4 in the command of the pre migration script, and a client id that is not a GUID, before contacting anything' {
+        $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile); LegacyMailboxIdentityClientIds = @($script:Ids.LegacyAppId) }
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'The pre migration script removes nothing, so the command of the pre migration script cannot name LegacyMailboxIdentityClientIds'
+        $script:Console = @()
+        $code = Invoke-StepSevenRun -Legacy @("$($script:Ids.LegacyAppId),not-a-guid")
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match "LegacyMailboxIdentityClientIds must be a GUID\. The value is 'not-a-guid'"
+        $script:Console = @()
+        $code = Invoke-StepSevenRun -Legacy @($script:Ids.LegacyAppId) -Channels @("$($script:Ids.MailboxAppId)' or 1 eq 1")
+        $code | Should -Be 1
+        ($script:Console -join "`n") | Should -Match 'EmailChannelIdentityClientIds must be a GUID'
+        Should -Invoke Connect-MgGraph -Times 0
     }
 }
 

@@ -33,14 +33,20 @@
       Command            Run
       Without -LaterRun  The pre migration script
       -LaterRun          The post migration script, with the permission reduction
+                         and the removal of the mailbox role assignments of the
+                         identities of version 4
 
     The pre migration script removes nothing. The deployment identity keeps its wider access
     until the post migration script, so that Neologik can repair a failed pre migration script or a failed
     deployment with that access.
 
     The grants for agents and Apps that work unattended in Microsoft 365 are not
-    part of this script. The onboarding kit script Grant-NeologikAgentAccess.ps1
-    applies them, with the agent grants file and the mailbox grants file.
+    part of this script. On an environment on version 5.2 or later of the Neologik
+    Platform, the grants list 'Grants for your administrator' on the Admin page of
+    the Neologik Admin Tool gives each grant its own command and script. On an
+    environment on version 5.0 or version 5.1, the onboarding kit script
+    Grant-NeologikAgentAccess.ps1 applies the grants, with the agent grants file
+    and the mailbox grants file.
 
     THE PRE MIGRATION SCRIPT
 
@@ -226,6 +232,22 @@
       complete, the script records the version of the onboarding kit on the
       resource group, in the tag NeologikOnboardingKit.
 
+    Step 7. The mailbox role assignments of the identities of version 4, with
+    -LaterRun.
+      Before version 5, an identity of the Neologik Platform could read a shared
+      mailbox through Exchange Online role assignments limited to that mailbox.
+      From version 5, an email channel reads the mailbox. An email channel either
+      keeps the identity of version 4, or uses an identity of its own. The step
+      runs when the command names -LegacyMailboxIdentityClientIds. For each
+      identity that the parameter names, the script reads the Exchange service
+      principal of the identity, the record by which Exchange Online knows the
+      identity, and the role assignments of the identity. The script removes
+      each role assignment, then the Exchange service principal. The script
+      never changes an identity that -EmailChannelIdentityClientIds names, and
+      changes no management scope, because the mailbox grant of an email
+      channel can use the same management scope. The step signs in to Exchange
+      Online with the same account.
+
     PERMISSIONS THAT THE SIGN-IN REQUESTS
 
     The sign-in to Microsoft Graph requests delegated permissions only. The script
@@ -246,6 +268,10 @@
       The pre migration script         User.Invite.All
       The pre migration script         AgentIdentityBlueprintPrincipal.ReadWrite.All
       A run with -LaterRun  GroupMember.ReadWrite.All
+
+    Step 7 signs in to Exchange Online with the same account, through the
+    Exchange Online module of Microsoft, and uses the rights of that account in
+    Exchange Online.
 
     OUTPUT
 
@@ -377,6 +403,23 @@
     Contributor on the subscription and on the resource group from that identity. The command from Neologik gives the
     value. Without the parameter the post migration script leaves the roles of that identity.
 
+.PARAMETER LegacyMailboxIdentityClientIds
+    The client id of each identity of version 4 of the Neologik Platform that
+    holds Exchange Online role assignments on a mailbox, and that no email channel
+    uses. Step 7 of the post migration script removes the role assignments and the
+    Exchange service principal of each identity. One value can hold several client
+    ids, separated by commas. The command from Neologik gives the value. Without
+    the parameter the post migration script does not contact Exchange Online. The
+    pre migration script refuses the parameter, because the pre migration script
+    removes nothing.
+
+.PARAMETER EmailChannelIdentityClientIds
+    The client id of each identity that an email channel of the environment uses.
+    Step 7 of the post migration script never changes the role assignments of
+    these identities, even when -LegacyMailboxIdentityClientIds names the same
+    identity. One value can hold several client ids, separated by commas. The
+    command from Neologik gives the value.
+
 .PARAMETER UploadStorageAccountName
     A storage account of the environment to which the script uploads the files of
     the run when the storage account of the onboarding is not found or does not take
@@ -394,8 +437,10 @@
 
 .PARAMETER UseAzureCliToken
     The script signs in to Microsoft Graph and to Azure with the Azure CLI session
-    of the workstation. The script shows no sign-in prompt. Neologik uses the
-    parameter. Leave the parameter out of the command.
+    of the workstation. The script shows no sign-in prompt for Microsoft Graph and
+    Azure. The sign-in to Exchange Online in step 7 still uses the browser or a
+    device code. Neologik uses the parameter. Leave the parameter out of the
+    command.
 
 .PARAMETER SubscriptionId
     The id of the Azure subscription. Required for the pre migration script when the command
@@ -424,6 +469,11 @@
 
     The post migration script. The script reduces the access of the deployment identity and of the script runner identity.
 
+.EXAMPLE
+    ./Migrate-NeologikEnvironment.ps1 -KitVersion v5.0.15 -TenantId <tenant id> -DeploySpClientId <client id> -SolutionName neo-abcprd-uks-01 -SolutionShortName abcprd01 -SignInAppClientId <client id> -NceUserGroupId <group id> -AdminGroupId <group id> -SubscriptionId <subscription id> -ResourceGroupName rg-neo-abcprd-uks-01 -LaterRun -ScriptRunnerObjectId <script runner identity object id> -LegacyMailboxIdentityClientIds <client id> -EmailChannelIdentityClientIds <client id>
+
+    The post migration script with step 7. The script also removes the mailbox role assignments of the identity of version 4, and keeps those of the identity of the email channel.
+
 .NOTES
     Requires PowerShell 7.4 or later.
 
@@ -443,7 +493,8 @@
 
     The sign-in to Azure follows the same order.
     The browser signs in with the same account, so the browser does not usually ask
-    again.
+    again. The sign-in to Exchange Online in step 7 uses the browser of this
+    computer first, then a device code, with the same account.
 
     Checks. Before the script changes anything, the script confirms three facts.
       1. The workstation can reach each Microsoft address that the script uses.
@@ -530,6 +581,12 @@ param(
 
     [Parameter(Mandatory = $false)]
     [string]$ScriptRunnerObjectId,
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$LegacyMailboxIdentityClientIds,
+
+    [Parameter(Mandatory = $false)]
+    [string[]]$EmailChannelIdentityClientIds,
 
     [Parameter(Mandatory = $false)]
     [string]$UploadStorageAccountName,
@@ -740,6 +797,11 @@ $script:PreflightEndpoints = @(
     @{ Name = 'Azure Resource Manager'; Uri = 'https://management.azure.com/' },
     @{ Name = 'PowerShell Gallery, for the PowerShell modules'; Uri = 'https://www.powershellgallery.com/' }
 )
+# The address of Exchange Online. A post migration script whose step 7 removes a mailbox
+# role assignment checks this address too, before the script changes anything.
+$script:ExchangeEndpoint = @{ Name = 'Exchange Online'; Uri = 'https://outlook.office365.com/' }
+# Step 7 requires the Exchange Online module, ExchangeOnlineManagement, 3.0 or later.
+$script:ExchangeModuleMinimumVersion = [version]'3.0.0'
 # The script requires Microsoft Graph PowerShell 2.0 or later.
 $script:GraphModuleMinimumVersion = [version]'2.0.0'
 $script:GraphModules = @(
@@ -758,7 +820,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.2.0'
+$script:ScriptVersion = '1.3.0'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -976,9 +1038,9 @@ function Assert-NeologikWriteAllowed {
 
 function Invoke-NeologikWrite {
     <#
-    Calls one SDK command that writes to Microsoft Graph or to Azure. The function
-    refuses the call in a run with -Verify. Otherwise the function calls the command
-    with -ErrorAction Stop and returns the output.
+    Calls one SDK command that writes to Microsoft Graph, to Azure or to Exchange
+    Online. The function refuses the call in a run with -Verify. Otherwise the
+    function calls the command with -ErrorAction Stop and returns the output.
     #>
     param([Parameter(Mandatory)][string]$Command, [hashtable]$Parameters = @{})
     Assert-NeologikWriteAllowed -Description $Command
@@ -1455,7 +1517,11 @@ function Test-NeologikPreflightEndpoint {
     # Returns $true. Returns $false after the function names each address that did not
     # answer.
     $unreachable = @()
-    foreach ($endpoint in $script:PreflightEndpoints) {
+    # A post migration script whose step 7 removes a mailbox role assignment contacts
+    # Exchange Online, so that address must answer too.
+    $endpoints = @($script:PreflightEndpoints)
+    if (@(Get-NeologikMailboxIdentityToRemove).Count -gt 0) { $endpoints += @($script:ExchangeEndpoint) }
+    foreach ($endpoint in $endpoints) {
         if (Test-NeologikEndpoint -Uri $endpoint.Uri) {
             Write-Log "  $($endpoint.Name): reached" -Level Success
         }
@@ -1653,6 +1719,14 @@ function Resolve-NeologikInput {
     # hold several client ids, separated by commas.
     $state.BotAppClientIds = @(@(Get-NeologikProperty $Parameters 'BotAppClientIds' @()) | ForEach-Object { "$_" -split ',' } |
         ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique)
+    # Step 7 of the post migration script: the identities of version 4 whose Exchange Online
+    # role assignments the script removes, and the identities that an email channel uses,
+    # which the script keeps. One element can hold several client ids, separated by commas.
+    # The script compares the client ids in lower case.
+    foreach ($name in @('LegacyMailboxIdentityClientIds', 'EmailChannelIdentityClientIds')) {
+        $state[$name] = @(@(Get-NeologikProperty $Parameters $name @()) | ForEach-Object { "$_" -split ',' } |
+            ForEach-Object { $_.Trim().ToLowerInvariant() } | Where-Object { $_ } | Select-Object -Unique)
+    }
     if (-not $state.BlueprintKey) { $state.BlueprintKey = 'default' }
     $state.UseAzureCliToken = [bool](Get-NeologikProperty $Parameters 'UseAzureCliToken' $false)
     $state.LaterRun = [bool](Get-NeologikProperty $Parameters 'LaterRun' $false)
@@ -1783,10 +1857,17 @@ function Resolve-NeologikInput {
         @{ Name = 'SubscriptionId'; Value = $state.SubscriptionId },
         @{ Name = 'ScriptRunnerObjectId'; Value = $state.ScriptRunnerObjectId })
     foreach ($botId in $state.BotAppClientIds) { $idChecks += @{ Name = 'BotAppClientIds'; Value = $botId } }
+    foreach ($name in @('LegacyMailboxIdentityClientIds', 'EmailChannelIdentityClientIds')) {
+        foreach ($clientId in $state[$name]) { $idChecks += @{ Name = $name; Value = $clientId } }
+    }
     foreach ($idCheck in $idChecks) {
         if ($idCheck.Value -and -not (Test-NeologikGuid $idCheck.Value)) {
             throw [System.ArgumentException]::new("$($idCheck.Name) must be a GUID. The value is '$($idCheck.Value)'.")
         }
+    }
+    # The pre migration script removes nothing, so its command names no identity of version 4.
+    if ($state.Run -eq 'PreWindow' -and $state.LegacyMailboxIdentityClientIds.Count -gt 0) {
+        throw [System.ArgumentException]::new('The pre migration script removes nothing, so the command of the pre migration script cannot name LegacyMailboxIdentityClientIds. Step 7 of the post migration script, with -LaterRun, removes the mailbox role assignments of those identities. Remove -LegacyMailboxIdentityClientIds from the command, or ask Neologik for the current command.')
     }
     # The user group is a group of its own. One id under two parameters would rename
     # the same group back and forth on every run.
@@ -1847,6 +1928,12 @@ function Write-NeologikHeader {
     if ($state.NceUserGroupId) { $lines += "  User group of the Neologik Admin Tool:  $($state.NceUserGroupId)" }
     if ($state.AdminGroupId) { $lines += "  Admin User Group:                           $($state.AdminGroupId)" }
     if ($state.ScriptRunnerObjectId) { $lines += "  Script runner identity:                     $($state.ScriptRunnerObjectId)" }
+    if ($state.Run -eq 'PostWindow' -and $state.LegacyMailboxIdentityClientIds.Count -gt 0) {
+        $lines += "  Mailbox identities of version 4:            $($state.LegacyMailboxIdentityClientIds -join ', ')"
+    }
+    if ($state.Run -eq 'PostWindow' -and $state.EmailChannelIdentityClientIds.Count -gt 0) {
+        $lines += "  Email channel identities:                   $($state.EmailChannelIdentityClientIds -join ', ')"
+    }
     $lines += "  SQL managed identity:                       $($state.SqlIdentityName)"
     $lines += "  Key Vault:                                  $($state.KeyVaultName)"
     $lines += "  Subscription:                               $($state.SubscriptionId)"
@@ -5289,6 +5376,234 @@ function Invoke-NeologikPermissionReduction {
     else { Add-Summary 'Onboarding kit version tag' 'SKIPPED: the agent registration identity or another item of the onboarding kit is not complete. Run the script again' }
 }
 
+# ----- Step 7: the mailbox role assignments of the identities of version 4 ----------
+# Before version 5, an identity of the Neologik Platform could read a shared mailbox
+# through Exchange Online role assignments limited to that mailbox. From version 5, an
+# email channel reads the mailbox, as the identity of version 4 or as an identity of its
+# own. Step 7 removes the role assignments that no email channel uses. The step changes
+# only the identities that the command names, and never an identity that an email
+# channel uses.
+
+function Get-NeologikMailboxIdentityToRemove {
+    # Returns the client ids whose Exchange Online role assignments step 7 removes: each
+    # identity that -LegacyMailboxIdentityClientIds names, apart from each identity that
+    # -EmailChannelIdentityClientIds names. Returns nothing in the pre migration script.
+    $state = $script:State
+    if ([string](Get-NeologikProperty $state 'Run' '') -ne 'PostWindow') { return @() }
+    $inUse = @(Get-NeologikProperty $state 'EmailChannelIdentityClientIds' @())
+    return @(@(Get-NeologikProperty $state 'LegacyMailboxIdentityClientIds' @()) | Where-Object { $inUse -notcontains $_ })
+}
+
+function Get-NeologikExchangeServicePrincipal {
+    <#
+    Returns the Exchange service principal of an identity: the record by which Exchange
+    Online knows the identity. Returns $null when Exchange Online holds no such record.
+    Exchange Online answers a value of -Identity that names no object with every service
+    principal of the organisation, so the function keeps only the record whose AppId is
+    the client id. Throws on every other failure, so that a read that fails never counts
+    as an absent record.
+    #>
+    param([Parameter(Mandatory)][string]$ClientId)
+    $found = @()
+    try {
+        $found = @(Get-ServicePrincipal -Identity $ClientId -ErrorAction Stop)
+    }
+    catch {
+        if ((Get-NeologikErrorText $_) -match "(?i)ManagementObjectNotFound|couldn't be found|could not be found") { return $null }
+        throw
+    }
+    $matching = @($found | Where-Object { [string](Get-NeologikProperty $_ 'AppId' '') -eq $ClientId })
+    if ($matching.Count -gt 1) {
+        throw "Exchange Online holds $($matching.Count) Exchange service principals with the client id $ClientId. The script removes nothing for the identity"
+    }
+    if ($matching.Count -eq 1) { return $matching[0] }
+    return $null
+}
+
+function Test-NeologikExchangeAssignmentOf {
+    # Returns $true when a role assignment belongs to the Exchange service principal that the
+    # identifiers name. Exchange Online names the assignee of an application role assignment
+    # by the object id of the service principal, with the assignee type ServicePrincipal. A
+    # user or a group with the same name never counts.
+    param($Assignment, [string[]]$Identifiers)
+    $type = [string](Get-NeologikProperty $Assignment 'RoleAssigneeType' '')
+    if ($type -and $type -ne 'ServicePrincipal') { return $false }
+    return ($Identifiers -contains [string](Get-NeologikProperty $Assignment 'RoleAssigneeName' ''))
+}
+
+function Get-NeologikExchangeAssignment {
+    <#
+    Returns every Exchange Online role assignment of an Exchange service principal. The
+    function first reads the role assignments with -RoleAssignee, which some organisations
+    refuse for a service principal. When that read fails or finds nothing, the function
+    reads every role assignment of the organisation. Either way the function keeps only the
+    role assignments of the service principal, so that a broader answer of Exchange Online
+    never reaches a removal. A failure of the second read throws.
+    #>
+    param([Parameter(Mandatory)]$ServicePrincipal)
+    $ids = @(@(
+            [string](Get-NeologikProperty $ServicePrincipal 'ObjectId' ''),
+            [string](Get-NeologikProperty $ServicePrincipal 'Identity' ''),
+            [string](Get-NeologikProperty $ServicePrincipal 'AppId' ''),
+            [string](Get-NeologikProperty $ServicePrincipal 'DisplayName' '')
+        ) | Where-Object { $_ } | Select-Object -Unique)
+    $assignments = @()
+    try {
+        $assignments = @(Get-ManagementRoleAssignment -RoleAssignee $ids[0] -ErrorAction Stop |
+            Where-Object { Test-NeologikExchangeAssignmentOf -Assignment $_ -Identifiers $ids })
+    }
+    catch { $assignments = @() }
+    if ($assignments.Count -eq 0) {
+        $assignments = @(Get-ManagementRoleAssignment -ErrorAction Stop |
+            Where-Object { Test-NeologikExchangeAssignmentOf -Assignment $_ -Identifiers $ids })
+    }
+    return $assignments
+}
+
+function Connect-NeologikExchangeOnline {
+    <#
+    Signs in to Exchange Online for step 7, with the account of the sign-in to Microsoft
+    Graph. The first method is the browser sign-in of the Exchange Online module. The
+    second method is the device code of the Exchange Online module. Many organisations
+    block the device code with a Conditional Access policy, so the device code is not the
+    first method. Returns $true. Returns $false after the function prints what to do.
+    #>
+    $state = $script:State
+    if (Test-NeologikDesktop) {
+        try {
+            Write-Log '  The script signs in to Exchange Online in the browser of this computer. Sign in with the same account' -Level Info
+            $exchangeParameters = @{ ShowBanner = $false; ErrorAction = 'Stop' }
+            $signInAccount = [string](Get-NeologikProperty $state 'SignInAccount' '')
+            if ($signInAccount) { $exchangeParameters['UserPrincipalName'] = $signInAccount }
+            Connect-ExchangeOnline @exchangeParameters | Out-Null
+            return $true
+        }
+        catch {
+            Write-Log "  The sign-in to Exchange Online in the browser did not complete. $(Get-NeologikErrorText $_). The script tries a device code" -Level Warning
+        }
+    }
+    try {
+        Write-Log '  The script signs in to Exchange Online with a device code. Sign in with the same account' -Level Info
+        Connect-ExchangeOnline -Device -ShowBanner:$false -ErrorAction Stop | Out-Null
+        return $true
+    }
+    catch {
+        Write-Log "  The sign-in to Exchange Online failed. $(Get-NeologikErrorText $_)" -Level Error
+        Write-ActionRequired "The sign-in to Exchange Online did not complete. The script tried the browser of this computer and a device code.`nThe script removed no mailbox role assignment. Run the post migration script again on a computer with a desktop and a browser.`nSign in as a Global Administrator of tenant $($state.TenantId)."
+        return $false
+    }
+}
+
+function Remove-NeologikLegacyMailboxIdentity {
+    <#
+    Removes the Exchange Online role assignments of one identity of version 4, then the
+    Exchange service principal of the identity. The function reads the state first. The
+    function tries each role assignment, and removes the Exchange service principal only
+    after the last role assignment, so that a second run finds an identity whose removal
+    stopped part way. The function keeps every management scope, because the mailbox
+    grant of an email channel can use the same management scope. In a run with -Verify
+    the function reports the pending removal and writes nothing.
+    #>
+    param([Parameter(Mandatory)][string]$ClientId)
+    $label = "Mailbox role assignments to remove: $ClientId"
+    try {
+        $sp = Get-NeologikExchangeServicePrincipal -ClientId $ClientId
+        if (-not $sp) {
+            Write-Log "  Identity ${ClientId}: Exchange Online holds no Exchange service principal of the identity. The script removes nothing" -Level Success
+            Add-Summary $label 'Not present'
+            return
+        }
+        $assignments = @(Get-NeologikExchangeAssignment -ServicePrincipal $sp)
+        if (Test-NeologikVerifyOnly) {
+            Add-NeologikPendingChange $label "REMOVE: $($assignments.Count) role assignment(s) and the Exchange service principal"
+            return
+        }
+        $removed = 0
+        $failures = @()
+        foreach ($assignment in $assignments) {
+            $name = [string](Get-NeologikProperty $assignment 'Name' '')
+            if (-not $name) {
+                # The removal names each role assignment by its name, and never by an empty value.
+                $failures += 'A role assignment without a name: the script removed nothing for that role assignment.'
+                continue
+            }
+            try {
+                Invoke-NeologikWrite -Command 'Remove-ManagementRoleAssignment' -Parameters @{ Identity = $name; Confirm = $false } | Out-Null
+                $removed++
+                Write-Log "  Identity ${ClientId}: the script removed the role assignment $name, role $([string](Get-NeologikProperty $assignment 'Role' ''))" -Level Success
+            }
+            catch {
+                $failures += "${name}: $(Get-NeologikErrorText $_)"
+            }
+        }
+        if ($failures.Count -gt 0) {
+            $reason = "the script removed $removed of $($assignments.Count) role assignment(s) and kept the Exchange service principal. Run the post migration script again. $($failures -join ' ')"
+            Write-Log "  Identity ${ClientId}: FAILED. $reason" -Level Error
+            Add-Summary $label "FAILED: $reason"
+            return
+        }
+        # The object id names exactly this Exchange service principal. The client id, which the
+        # read confirmed as the AppId of the record, names it too.
+        $spIdentity = [string](Get-NeologikProperty $sp 'ObjectId' '')
+        if (-not $spIdentity) { $spIdentity = $ClientId }
+        Invoke-NeologikWrite -Command 'Remove-ServicePrincipal' -Parameters @{ Identity = $spIdentity; Confirm = $false } | Out-Null
+        Write-Log "  Identity ${ClientId}: the script removed $removed role assignment(s) and the Exchange service principal" -Level Success
+        Add-Summary $label "Removed: $removed role assignment(s) and the Exchange service principal"
+    }
+    catch {
+        $reason = Get-NeologikErrorText $_
+        Write-Log "  Identity ${ClientId}: FAILED. $reason" -Level Error
+        Add-Summary $label "FAILED: $reason"
+    }
+}
+
+function Remove-NeologikLegacyMailboxAccess {
+    <#
+    Step 7 of the post migration script: the Exchange Online role assignments of the
+    identities of version 4. The function does nothing when the command names no identity
+    of version 4. The function reports each identity that an email channel uses as kept,
+    and never contacts Exchange Online for such an identity. For each other identity that
+    the command names, the function removes the role assignments and the Exchange service
+    principal. The function signs in to Exchange Online only when an identity remains to
+    remove, and closes the session at the end of the step.
+    #>
+    $state = $script:State
+    $legacy = @(Get-NeologikProperty $state 'LegacyMailboxIdentityClientIds' @())
+    if ($legacy.Count -eq 0) {
+        Write-Log 'Step 7: the command names no identity of version 4. The script does not contact Exchange Online' -Level Info
+        return
+    }
+    Write-Log 'Step 7: the mailbox role assignments of the identities of version 4' -Level Info
+    $inUse = @(Get-NeologikProperty $state 'EmailChannelIdentityClientIds' @())
+    # The summary lists each identity of the command once.
+    foreach ($clientId in $inUse) {
+        Write-Log "  Identity ${clientId}: an email channel uses the identity. The script keeps the role assignments" -Level Success
+        $item = if ($legacy -contains $clientId) { "Mailbox role assignments to remove: $clientId" } else { "Email channel identity: $clientId" }
+        Add-Summary $item 'Kept. An email channel uses the identity'
+    }
+    $toRemove = @(Get-NeologikMailboxIdentityToRemove)
+    if ($toRemove.Count -eq 0) {
+        Write-Log '  An email channel uses each identity that the command names. The script does not contact Exchange Online' -Level Info
+        return
+    }
+    $items = @($toRemove | ForEach-Object { "Mailbox role assignments to remove: $_" })
+    if (-not (Import-NeologikModuleSet -Names @('ExchangeOnlineManagement') -MinimumVersion $script:ExchangeModuleMinimumVersion `
+                -InstallHint 'Install-Module ExchangeOnlineManagement -Scope CurrentUser -Force')) {
+        foreach ($item in $items) { Add-Summary $item 'SKIPPED: the Exchange Online module is not available' }
+        return
+    }
+    if (-not (Connect-NeologikExchangeOnline)) {
+        foreach ($item in $items) { Add-Summary $item 'SKIPPED: the sign-in to Exchange Online failed' }
+        return
+    }
+    try {
+        foreach ($clientId in $toRemove) { Remove-NeologikLegacyMailboxIdentity -ClientId $clientId }
+    }
+    finally {
+        try { Disconnect-ExchangeOnline -Confirm:$false -ErrorAction Stop | Out-Null } catch { Write-Verbose "The script ignores the error. $($_.Exception.Message)" }
+    }
+}
+
 # ----- Snapshot, upload and the file list ------------------------------------------
 
 function Get-NeologikSnapshotSection {
@@ -5921,9 +6236,12 @@ function Invoke-NeologikPreWindowRun {
 }
 
 function Invoke-NeologikPostWindowRun {
-    # The post migration script: the permission reduction.
+    # The post migration script: the permission reduction, then step 7, the mailbox role
+    # assignments of the identities of version 4. Step 7 needs no Azure session, so the
+    # step runs also when the permission reduction skipped its items.
     Remove-NeologikRetiredGraphRole
     Invoke-NeologikPermissionReduction
+    Remove-NeologikLegacyMailboxAccess
 }
 
 # ----- Summary ------------------------------------------------------------------
@@ -5986,6 +6304,9 @@ function Write-NeologikSummary {
             userGroupId          = [string](Get-NeologikProperty $state 'UserGroupId' '')
             nceContributorsGroupId = [string](Get-NeologikProperty $state 'NceContributorsGroupId' '')
             nceAdminsGroupId     = [string](Get-NeologikProperty $state 'NceAdminsGroupId' '')
+            # The identities that the command names for step 7 of the post migration script.
+            legacyMailboxIdentityClientIds = @(Get-NeologikProperty $state 'LegacyMailboxIdentityClientIds' @())
+            emailChannelIdentityClientIds  = @(Get-NeologikProperty $state 'EmailChannelIdentityClientIds' @())
             items                = @($script:Summary)
             attentionCount       = $attention.Count
             pendingChangeCount   = $pending.Count
@@ -6060,6 +6381,8 @@ function Invoke-NeologikEnvironmentMigration {
         [string]$BlueprintKey = 'default',
         [switch]$LaterRun,
         [string]$ScriptRunnerObjectId,
+        [string[]]$LegacyMailboxIdentityClientIds,
+        [string[]]$EmailChannelIdentityClientIds,
         [string]$UploadStorageAccountName,
         [switch]$UseAzureCliToken
     )
@@ -6104,6 +6427,8 @@ function Invoke-NeologikEnvironmentMigration {
             BlueprintKey            = $BlueprintKey
             LaterRun                = [bool]$LaterRun
             ScriptRunnerObjectId    = $ScriptRunnerObjectId
+            LegacyMailboxIdentityClientIds = @($LegacyMailboxIdentityClientIds)
+            EmailChannelIdentityClientIds  = @($EmailChannelIdentityClientIds)
             UploadStorageAccountName = $UploadStorageAccountName
             UseAzureCliToken        = [bool]$UseAzureCliToken
         }
