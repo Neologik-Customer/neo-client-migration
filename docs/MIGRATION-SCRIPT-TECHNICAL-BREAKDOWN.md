@@ -13,7 +13,7 @@ The migration script moves one existing Neologik Platform environment to version
 | Run | Writes |
 |---|---|
 | The pre migration script | Creates a directory object or a role assignment that is absent. Removes nothing |
-| The post migration script | Removes the access that the deployment identity does not need. Creates a role assignment that is absent first |
+| The post migration script | Removes the access that the deployment identity does not need. Creates a role assignment that is absent first. In step 7, removes the Exchange Online role assignments of each identity of version 4 that the command names, and keeps each identity that an email channel uses |
 
 ### What the deployment identity holds after the post migration script
 
@@ -46,15 +46,16 @@ After the post migration script the environment stands where an environment onbo
 3. [Steps in order](#steps-in-order)
 4. [Directory writes](#directory-writes)
 5. [Azure writes](#azure-writes)
-6. [Files](#files)
-7. [Changes to the workstation](#changes-to-the-workstation)
-8. [What the migration script never does](#what-the-migration-script-never-does)
-9. [What the log records](#what-the-log-records)
-10. [Repeat runs and failure](#repeat-runs-and-failure)
+6. [Exchange Online writes](#exchange-online-writes)
+7. [Files](#files)
+8. [Changes to the workstation](#changes-to-the-workstation)
+9. [What the migration script never does](#what-the-migration-script-never-does)
+10. [What the log records](#what-the-log-records)
+11. [Repeat runs and failure](#repeat-runs-and-failure)
 
 ## Sign-ins and permissions
 
-The migration script makes two sign-ins. Both sign-ins use the account of the administrator who runs the migration script. The migration script never signs in as a service principal. The migration script stores no token.
+The migration script makes two sign-ins, and a third, to Exchange Online, when the post migration script runs step 7. Each sign-in uses the account of the administrator who runs the migration script. The migration script never signs in as a service principal. The migration script stores no token.
 
 ### The sign-in to Microsoft Graph
 
@@ -96,6 +97,17 @@ The sign-in requests delegated permissions only. A delegated permission works on
 | Purpose | The role assignments of the deployment identity, the tag on the resource group, the read of the SQL server administrators, and the upload of the files of the run |
 | Upload of the files | A token for Azure Storage from the same sign-in, obtained with its refresh token, or from the Azure CLI with `-UseAzureCliToken`. The files go into the storage account directly, over HTTPS, with the data role Storage Blob Data Contributor of the signed-in administrator |
 
+### The sign-in to Exchange Online
+
+| Subject | Detail |
+|---|---|
+| When | In the post migration script only, when the command names an identity with `-LegacyMailboxIdentityClientIds` that `-EmailChannelIdentityClientIds` does not name. Otherwise the migration script never contacts Exchange Online |
+| Method | The browser sign-in of the Exchange Online PowerShell module of Microsoft, `ExchangeOnlineManagement`, naming the account of the Microsoft Graph sign-in |
+| Second method | The device code of the same module |
+| Rights | The rights that the signed-in account holds in Exchange Online. A Global Administrator holds the rights to read and remove role assignments and service principals in Exchange Online |
+| Purpose | The reads and the removals of step 7 |
+| End | The migration script closes the Exchange Online session at the end of step 7, also when step 7 fails |
+
 ### The check of the roles
 
 Before the migration script changes anything in the directory, the signed-in account must hold an active Global Administrator role. Before the migration script changes an Azure role, the signed-in account must hold Owner or User Access Administrator on the subscription. A run with `-Verify` warns and continues, and reports each item that the missing role would fail.
@@ -104,7 +116,7 @@ Before the migration script changes anything in the directory, the signed-in acc
 
 | Input | Content |
 |---|---|
-| Command-line parameters | The version of the onboarding kit that the migration brings the environment to (`-KitVersion`, required). The tenant, the deployment identity, the solution name and the short name, the Platform Sign-in application, the SharePoint application, each agent registration, the three groups, the subscription and the resource group. The name of the agent registration identity (`-DirectoryIdentityName`, required). The name of the SQL managed identity (`-SqlIdentityName`, required) and the name of the Key Vault (`-KeyVaultName`, required). The switches `-LaterRun`, `-Verify` and `-UseAzureCliToken`. The storage account for the upload |
+| Command-line parameters | The version of the onboarding kit that the migration brings the environment to (`-KitVersion`, required). The tenant, the deployment identity, the solution name and the short name, the Platform Sign-in application, the SharePoint application, each agent registration, the three groups, the subscription and the resource group. The name of the agent registration identity (`-DirectoryIdentityName`, required). The name of the SQL managed identity (`-SqlIdentityName`, required) and the name of the Key Vault (`-KeyVaultName`, required). For step 7 of the post migration script, `-LegacyMailboxIdentityClientIds` names the identities of version 4 whose Exchange Online role assignments step 7 removes. `-EmailChannelIdentityClientIds` names the identities that an email channel uses, which step 7 keeps. The pre migration script refuses `-LegacyMailboxIdentityClientIds`. The switches `-LaterRun`, `-Verify` and `-UseAzureCliToken`. The storage account for the upload |
 | `resource-providers.txt` | The resource providers and preview features that the Neologik Platform requires, the list of the onboarding kit. The migration package carries the file beside the migration script |
 | `-ConfigurationFile` | The configuration file that the onboarding wrote. The command from Neologik gives each value as a parameter, so the command needs no configuration file |
 | `NeologikGuestUsers.txt` | The Neologik support accounts that the pre migration script confirms as guests of the tenant. The file is beside the script, or `-GuestUsersFile` names the file |
@@ -125,6 +137,7 @@ The migration script checks each input before the first sign-in: each id is a GU
 | 5c | Pre and post migration scripts | The directory role Directory Readers of the SQL managed identity. The resource providers and preview features of `resource-providers.txt`. Azure role-based access control on the Key Vault. The settings and the containers of the deployment storage account |
 | 6 | Post migration script | The two Microsoft Graph application permissions, then the removal of seven other Microsoft Graph application permissions. The sign-in to Azure. The ten Azure roles. The removal of Contributor and User Access Administrator on the subscription. The removal of the directory role Application Administrator and of the membership of the Admin User Group. The removal of every other Azure role, directory role and group membership. The removal of every role assignment on the resource group whose identity is gone from Microsoft Entra ID. When the command names the script runner identity with `-ScriptRunnerObjectId`, Reader and Key Vault Secrets Officer on the resource group for that identity. Then the removal of Contributor on the subscription and on the resource group from that identity. The thirteen roles of the Admin User Group on the resource group, then the removal of every other role of the group in the subscription. The tag `NeologikOnboardingKit` |
 | 5b | Pre and post migration scripts | The agent registration identity, the Microsoft Graph application permission of the managed identity and the owners. The tag `NeologikOnboardingKit` waits for the agent registration identity, for the items of step 5c and, in the post migration script, for the roles of the Admin User Group |
+| 7 | Post migration script | Only when the command names `-LegacyMailboxIdentityClientIds`. Each identity that `-EmailChannelIdentityClientIds` names is kept. The sign-in to Exchange Online, when an identity remains to remove. For each such identity, the read of the Exchange service principal and of the role assignments, the removal of each role assignment, then the removal of the Exchange service principal. The close of the Exchange Online session |
 | Close | Pre and post migration scripts | The snapshot file, the summary table and the summary file, the upload, the list of files |
 
 ## Directory writes
@@ -175,12 +188,25 @@ The migration script removes no member other than the deployment identity. The m
 
 The migration script changes no Azure resource other than the agent registration identity, the tag, the role assignments, the registration of resource providers, the access model of the Key Vault and the settings and containers of the deployment storage account. The quota step reads the quotas of the subscription (App Service, compute, Azure OpenAI), the node pools of the cluster, the virtual machine sizes of the region and the model deployments of the AI accounts in the resource group, and changes none of them. The migration script reads the Microsoft Entra administrator of each SQL server in the resource group and changes nothing on the server.
 
+## Exchange Online writes
+
+Step 7 of the post migration script is the only step that contacts Exchange Online. Before any removal, the migration script reads the Exchange service principal of each identity that the step removes, and every role assignment of that Exchange service principal. The Exchange service principal is the record by which Exchange Online knows an identity of Microsoft Entra ID. Each write is one command of the Exchange Online module.
+
+| Write | Run | Object |
+|---|---|---|
+| Remove role assignment | Post migration script | Each Exchange Online role assignment of each identity that `-LegacyMailboxIdentityClientIds` names, unless `-EmailChannelIdentityClientIds` names the same identity |
+| Remove Exchange service principal | Post migration script | The Exchange service principal of each such identity, only after the last role assignment of the identity is removed. The identity itself stays in Microsoft Entra ID |
+
+The migration script creates nothing in Exchange Online, changes no management scope and never reads a mailbox. Exchange Online can refuse to filter the role assignments by the Exchange service principal, or the filter can find none. The migration script then reads every role assignment of the organisation, and keeps those whose assignee is the Exchange service principal of the identity. A read that fails stops the step for that identity: the migration script never takes a failed read for an absent Exchange service principal.
+
+Exchange Online answers a read for an identity that Exchange Online does not know with every Exchange service principal of the organisation. So the migration script keeps only the record whose client id is the client id that the command names. The migration script also keeps only the role assignments whose assignee is that record, with the assignee type of a service principal. A user or a group with the same name never counts. Each removal names the role assignment by its name, and the Exchange service principal by its object id.
+
 ## Files
 
 | File | Content | Secret |
 |---|---|---|
 | `NeologikEnvironmentMigration_<date and time>.log` | Every message of the run, each failed Microsoft Graph request with its status and request id, the summary table | None |
-| `Neologik_EnvironmentMigration_<PreWindow or PostWindow>_<date and time>.json` | The versions, the tenant, the deployment identity, the signed-in account, the permissions the deployment identity holds, the user group and the two role groups, every item of the summary | None |
+| `Neologik_EnvironmentMigration_<PreWindow or PostWindow>_<date and time>.json` | The versions, the tenant, the deployment identity, the signed-in account, the permissions the deployment identity holds, the user group and the two role groups, the client ids that the command names for step 7, every item of the summary | None |
 | `Neologik_EnvironmentMigration_Snapshot_<Pre or Post>_<date and time>.json` | The state of the application registrations, the security groups, the deployment identity and the resource group tags as the run leaves them | None. Credential kinds and expiry dates only, never a value |
 
 The migration script writes the files to its own folder, else to the current folder, else to the temporary folder. The migration script uploads the files to the storage account of the onboarding, `stneodeploy...`, else to the storage account that `-UploadStorageAccountName` names, with the Azure session of the administrator. A storage account behind a private endpoint cannot be reached, and the files stay on the workstation.
@@ -189,9 +215,9 @@ The migration script writes the files to its own folder, else to the current fol
 
 | Change | Detail |
 |---|---|
-| PowerShell modules | The migration script installs `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Identity.DirectoryManagement`, `Az.Accounts`, `Az.Resources`, `Az.Sql` and `Az.Storage` from the PowerShell Gallery, for the user account only, when a module is absent. The migration script checks the signature of each module that the migration script installs, before the migration script loads the module. See [Signature check of the PowerShell modules](#signature-check-of-the-powershell-modules) |
+| PowerShell modules | The migration script installs `Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Groups`, `Microsoft.Graph.Identity.DirectoryManagement`, `Az.Accounts`, `Az.Resources`, `Az.Sql` and `Az.Storage` from the PowerShell Gallery, for the user account only, when a module is absent. Step 7 of the post migration script installs `ExchangeOnlineManagement`, version 3.0 or later, the same way. The migration script checks the signature of each module that the migration script installs, before the migration script loads the module. See [Signature check of the PowerShell modules](#signature-check-of-the-powershell-modules) |
 | Removal of a PowerShell module | When a file fails the signature check, the migration script removes each module that the migration script installed for the step. The migration script removes no other module |
-| Sessions | The migration script opens a Microsoft Graph session and an Azure session for the run. The migration script stores no token |
+| Sessions | The migration script opens a Microsoft Graph session and an Azure session for the run. Step 7 opens an Exchange Online session and closes the session at the end of the step. The migration script stores no token |
 | Files | The three files of the run, in the folder of the script. The migration script reads `NeologikGuestUsers.txt` and `resource-providers.txt` from that folder |
 
 ### Signature check of the PowerShell modules
@@ -211,6 +237,7 @@ When a file fails the check, the migration script removes each module that the m
 | The Microsoft Graph modules, at the checks | The run stops before the sign-in to Microsoft Graph |
 | `Az.Accounts`, `Az.Resources` and `Az.Sql`, before the sign-in to Azure in step 5 or step 6 | The run makes no sign-in to Azure and no change in Azure. The summary reports each Azure role as `SKIPPED` |
 | `Az.Storage`, before the upload of the files of the run | The files of the run stay on the workstation, in the list `FILES TO SEND TO NEOLOGIK` |
+| `ExchangeOnlineManagement`, before the sign-in to Exchange Online in step 7 | The run makes no sign-in to Exchange Online and removes nothing in Exchange Online. The summary reports each identity of step 7 as `SKIPPED` |
 
 ## What the migration script never does
 
@@ -219,15 +246,16 @@ When a file fails the check, the migration script removes each module that the m
 - The migration script never gives administrator consent.
 - The migration script never changes an application registration that the command does not name by client id.
 - The migration script never removes a wider role before the deployment identity holds every narrower role.
-- The migration script never grants access to an agent or an App. The grants script of the onboarding kit, `Grant-NeologikAgentAccess.ps1`, does that with the agent grants file and the mailbox grants file.
+- The migration script never grants access to an agent or an App. From version 5.2 of the Neologik Platform, the grants list **Grants for your administrator** on the **Admin** page of the Neologik Admin Tool gives each grant a command and a script. On version 5.0 or version 5.1, the grants script of the onboarding kit, `Grant-NeologikAgentAccess.ps1`, applies the grants with the agent grants file and the mailbox grants file.
+- The migration script never removes the Exchange Online role assignments of an identity that `-EmailChannelIdentityClientIds` names, never changes a management scope and never reads a mailbox.
 - The migration script never signs in as a service principal and never stores a token.
 - The migration script never loads a module that the migration script installed before the signature check of the module passes.
 - With `-Verify`, the migration script writes nothing. Every write passes through one of two functions that refuse the write in a run with `-Verify`.
 
 ## What the log records
 
-The log file opens with the version of the migration script and the version of the onboarding kit. The log file records every message of the run, each failed Microsoft Graph request with its method, path, status and request id, and the summary table. The log file never records a token or a request body.
+The log file opens with the version of the migration script and the version of the onboarding kit. The log file records every message of the run, each failed Microsoft Graph request with its method, path, status and request id, each Exchange Online role assignment that step 7 removes, and the summary table. The log file never records a token or a request body.
 
 ## Repeat runs and failure
 
-The migration script checks each item separately and continues past a failed item. The summary names each failed item with the reason. The exit code is 1 when any item needs attention. A Global Administrator can run the migration script again at any time; a second run on an environment in the expected state changes nothing. The post migration script removes nothing unless the deployment identity holds the two Microsoft Graph application permissions and the ten Azure roles, so a failed post migration script leaves the wider access in place.
+The migration script checks each item separately and continues past a failed item. The summary names each failed item with the reason. The exit code is 1 when any item needs attention. A Global Administrator can run the migration script again at any time; a second run on an environment in the expected state changes nothing. The post migration script removes nothing unless the deployment identity holds the two Microsoft Graph application permissions and the ten Azure roles, so a failed post migration script leaves the wider access in place. Step 7 removes the Exchange service principal of an identity only after the last role assignment of the identity. A second run then finds an identity whose removal stopped part way, and removes the rest.

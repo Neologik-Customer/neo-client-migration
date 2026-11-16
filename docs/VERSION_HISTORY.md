@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.3.0](#version-130)
 2. [Version 1.2.0](#version-120)
 2. [Version 1.1.18](#version-1118)
 2. [Version 1.1.17](#version-1117)
@@ -43,7 +44,22 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.2.0 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.3.0 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.3.0
+
+**Date**: 2026-11-16
+
+This version applies to an environment on Neologik Platform version 5.0, version 5.1 or version 5.2.
+
+| Item | Change |
+|---|---|
+| The post migration script, step 7 | The post migration script removes the Exchange Online role assignments that the identities of version 4 still hold on a mailbox. The command names each such identity with `-LegacyMailboxIdentityClientIds`, and each identity that an email channel uses with `-EmailChannelIdentityClientIds`. For each identity of version 4, the migration script reads the Exchange service principal and the role assignments, removes each role assignment, then removes the Exchange service principal. Exchange Online answers a read for an unknown identity with every service principal, so the migration script keeps only the record whose client id is the named client id, and only the role assignments of that record. The migration script never changes an identity that an email channel uses, and changes no management scope. With `-Verify` the step reports each pending removal and writes nothing |
+| The post migration script, the sign-in to Exchange Online | Step 7 signs in to Exchange Online with the same account, in the browser first, then with a device code. The migration script checks the address of Exchange Online before the run changes anything, and installs the Exchange Online module, `ExchangeOnlineManagement` 3.0 or later, after the signature check of its files. A post migration script whose command names no identity of version 4 does not contact Exchange Online |
+| The pre migration script | The pre migration script refuses `-LegacyMailboxIdentityClientIds`, because the pre migration script removes nothing |
+| The grants for agents and Apps | The guide, the technical breakdown and the README name the source of the grants. From version 5.2 of the Neologik Platform, the grants list **Grants for your administrator** on the **Admin** page of the Neologik Admin Tool gives each grant its own command and script. On version 5.0 or version 5.1, the grants script of the onboarding kit applies the grants |
+| The summary file | The summary file names the client ids of the identities of step 7 |
+| The changes of version 1.2.0 | This version includes every change of version 1.2.0 |
 
 ## Version 1.2.0
 
