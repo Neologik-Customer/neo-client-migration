@@ -742,6 +742,9 @@ $script:PreflightEndpoints = @(
 )
 # The script requires Microsoft Graph PowerShell 2.0 or later.
 $script:GraphModuleMinimumVersion = [version]'2.0.0'
+# The version of Microsoft Graph PowerShell that the script installs when a module is
+# missing. Every file of this version carries a valid signature of Microsoft Corporation.
+$script:GraphModuleVersion = [version]'2.40.0'
 $script:GraphModules = @(
     'Microsoft.Graph.Authentication',
     'Microsoft.Graph.Applications',
@@ -758,7 +761,7 @@ $script:Summary = @()
 # The state of the run: the inputs and the principals that the script found.
 $script:State = @{}
 # The version of this script. docs\VERSION_HISTORY.md opens with the same version.
-$script:ScriptVersion = '1.2.0'
+$script:ScriptVersion = '1.2.1'
 # The version of the onboarding kit that the migration brings the environment to. The
 # command gives the value with -KitVersion. The script records the value on the
 # resource group, in the tag NeologikOnboardingKit, at the end of each run that
@@ -1002,8 +1005,13 @@ function Get-NeologikLoadedModuleVersion {
 }
 
 function Install-NeologikModule {
-    param([string]$Name, [version]$MinimumVersion)
-    Install-Module -Name $Name -Scope CurrentUser -Force -AllowClobber -MinimumVersion $MinimumVersion -ErrorAction Stop
+    param([string]$Name, [version]$MinimumVersion, [version]$RequiredVersion)
+    if ($RequiredVersion) {
+        Install-Module -Name $Name -Scope CurrentUser -Force -AllowClobber -RequiredVersion $RequiredVersion -ErrorAction Stop
+    }
+    else {
+        Install-Module -Name $Name -Scope CurrentUser -Force -AllowClobber -MinimumVersion $MinimumVersion -ErrorAction Stop
+    }
 }
 
 function Import-NeologikModule {
@@ -2110,7 +2118,7 @@ function Assert-NeologikModuleSignature {
     $queue = [System.Collections.Generic.Queue[object]]::new()
 
     foreach ($module in $Modules) {
-        $found = Find-NeologikInstalledModule -Name $module.Name -MinimumVersion $module.MinVersion
+        $found = Find-NeologikInstalledModule -Name $module.Name -MinimumVersion $module.MinVersion -RequiredVersion $module.InstallVersion
         if ($found) {
             $installed += $found
             $queue.Enqueue($found)
@@ -2181,21 +2189,28 @@ function Import-NeologikModuleSet {
     -Independent: each module has a version number separate from the other modules.
     The Az modules Az.Accounts, Az.Resources and Az.Sql never share a version
     number. The function imports each module at the highest version available.
+    -InstallVersion: the exact version that the function installs when a module is
+    missing. Without it, the function installs the newest version.
     #>
-    param([string[]]$Names, [version]$MinimumVersion, [string]$InstallHint, [switch]$Independent)
+    param([string[]]$Names, [version]$MinimumVersion, [version]$InstallVersion, [string]$InstallHint, [switch]$Independent)
     try {
         $installed = @()
         foreach ($name in $Names) {
             $versions = @(Get-NeologikAvailableModuleVersion -Name $name | Where-Object { $_ -ge $MinimumVersion })
             if ($versions.Count -eq 0) {
-                Write-Log "The script installs the PowerShell module $name for your user account" -Level Info
-                Install-NeologikModule -Name $name -MinimumVersion $MinimumVersion
+                if ($InstallVersion) {
+                    Write-Log "The script installs the PowerShell module $name, version $InstallVersion, for your user account" -Level Info
+                }
+                else {
+                    Write-Log "The script installs the PowerShell module $name for your user account" -Level Info
+                }
+                Install-NeologikModule -Name $name -MinimumVersion $MinimumVersion -RequiredVersion $InstallVersion
                 $installed += $name
             }
         }
         # Check the signature of each file that the download brought, before the script imports any module of the set.
         if ($installed.Count -gt 0) {
-            Assert-NeologikModuleSignature -Modules @($installed | ForEach-Object { @{ Name = $_; MinVersion = [string]$MinimumVersion } })
+            Assert-NeologikModuleSignature -Modules @($installed | ForEach-Object { @{ Name = $_; MinVersion = [string]$MinimumVersion; InstallVersion = [string]$InstallVersion } })
         }
         if ($Independent) {
             foreach ($name in $Names) { Import-NeologikModule -Name $name }
@@ -6125,8 +6140,8 @@ function Invoke-NeologikEnvironmentMigration {
     Write-Log 'The script checks that this workstation can reach each Microsoft address' -Level Info
     if (-not (Test-NeologikPreflightEndpoint)) { return (Exit-NeologikRun 'a Microsoft address did not answer. Read the messages above') }
 
-    if (-not (Import-NeologikModuleSet -Names $script:GraphModules -MinimumVersion $script:GraphModuleMinimumVersion `
-                -InstallHint 'Install-Module Microsoft.Graph.Authentication, Microsoft.Graph.Applications, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement -Scope CurrentUser -Force')) {
+    if (-not (Import-NeologikModuleSet -Names $script:GraphModules -MinimumVersion $script:GraphModuleMinimumVersion -InstallVersion $script:GraphModuleVersion `
+                -InstallHint "Install-Module Microsoft.Graph -RequiredVersion $($script:GraphModuleVersion) -Scope CurrentUser -Force")) {
         return (Exit-NeologikRun 'the Microsoft Graph modules did not load. Read the messages above')
     }
     if (-not (Connect-NeologikGraph)) { return (Exit-NeologikRun 'the sign-in to Microsoft Graph did not complete, or the signed-in account is not a Global Administrator. Read the messages above') }

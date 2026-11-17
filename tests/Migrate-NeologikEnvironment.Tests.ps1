@@ -1353,7 +1353,8 @@ Context 'Modules and sign-in' {
         $code = Invoke-Run @{ ConfigurationFile = (New-ConfigFile) }
         $code | Should -Be 1
         ($script:Console -join "`n") | Should -Match 'ACTION REQUIRED'
-        ($script:Console -join "`n") | Should -Match 'Install-Module Microsoft.Graph.Authentication'
+        ($script:Console -join "`n") | Should -Match 'Install-Module Microsoft\.Graph -RequiredVersion 2\.40\.0 -Scope CurrentUser -Force'
+        Should -Invoke Install-NeologikModule -ParameterFilter { $RequiredVersion -eq [version]'2.40.0' }
         Should -Invoke Connect-MgGraph -Times 0
     }
 
@@ -1369,7 +1370,7 @@ Context 'Modules and sign-in' {
         $console = $script:Console -join "`n"
         $console | Should -Match 'ACTION REQUIRED'
         $console | Should -Match 'failed the signature check'
-        $console | Should -Not -Match 'Install-Module Microsoft.Graph.Authentication'
+        $console | Should -Not -Match 'Install-Module Microsoft\.Graph'
         $script:Imports | Should -HaveCount 0
         Should -Invoke Connect-MgGraph -Times 0
         Get-SummaryResult 'Run' | Should -Be 'FAILED: the Microsoft Graph modules did not load. Read the messages above'
