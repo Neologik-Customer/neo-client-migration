@@ -46,7 +46,7 @@ Example: an environment moves to version 5.2. After the post migration script, a
 | Owner on the subscription | The same account changes the Azure role assignments of the deployment identity and of the Admin User Group, creates the agent registration identity on the resource group, registers resource providers, and changes the settings of the Key Vault and of the deployment storage account |
 | The command from Neologik | The command names your tenant, your subscription, your resource group, the application registrations of the environment and the version of the onboarding kit that the migration brings your environment to |
 
-The migration script installs the PowerShell modules that the run needs, for your user account, when the modules are missing: the Microsoft Graph modules and the Az modules. Step 7 of the post migration script also installs the Exchange Online module `ExchangeOnlineManagement` when the module is missing.
+The migration script installs the PowerShell modules that the run needs, for your user account, when the modules are missing: the Microsoft Graph modules, at version 2.40.0, and the Az modules. Step 7 of the post migration script also installs the Exchange Online module `ExchangeOnlineManagement` when the module is missing.
 
 Before the migration script loads a module that the migration script installed, the migration script checks the Authenticode signature of each file of the module. [MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md](MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md#signature-check-of-the-powershell-modules) describes the check. When a file fails the check, the migration script removes each module that the migration script installed for the step, and loads no module of the step. The migration script then prints what to do.
 
