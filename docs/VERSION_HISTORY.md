@@ -13,6 +13,7 @@ This document lists the versions of the Neologik migration package. For each ver
 ## Contents
 
 1. [Scripts in this version](#scripts-in-this-version)
+2. [Version 1.2.1](#version-121)
 2. [Version 1.2.0](#version-120)
 2. [Version 1.1.18](#version-1118)
 2. [Version 1.1.17](#version-1117)
@@ -43,7 +44,18 @@ This document lists the versions of the Neologik migration package. For each ver
 
 | Script | Version of the script | Purpose |
 |---|---|---|
-| `Migrate-NeologikEnvironment.ps1` | 1.2.0 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+| `Migrate-NeologikEnvironment.ps1` | 1.2.1 | Moves an existing environment to version 5 of the Neologik Platform: confirms the access that the deployment identity needs in the pre migration script, and reduces the access in the post migration script |
+
+## Version 1.2.1
+
+**Date**: 2026-11-17
+
+This version applies to an environment on Neologik Platform version 5.0, version 5.1 or version 5.2.
+
+| Item | Change |
+|---|---|
+| The pre migration script and the post migration script, the PowerShell modules | When a Microsoft Graph module is missing, the migration script installs version 2.40.0 of the module exactly. Every file of version 2.40.0 carries a valid signature of Microsoft Corporation. The signature check reads version 2.40.0. Before this version, the migration script installed the newest version. Versions 2.41.0, 2.41.1 and 2.41.2 hold the file `Microsoft.Graph.Authentication.Loader.dll` with no signature, so the signature check removed the modules and stopped the run |
+| `docs/MIGRATION-SCRIPT-GUIDE.md` and `docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` | Each document names the version of the Microsoft Graph modules that the migration script installs |
 
 ## Version 1.2.0
 
