@@ -14,6 +14,7 @@ This document lists the versions of the Neologik migration package. For each ver
 
 1. [Scripts in this version](#scripts-in-this-version)
 2. [Version 1.3.0](#version-130)
+2. [Version 1.2.1](#version-121)
 2. [Version 1.2.0](#version-120)
 2. [Version 1.1.18](#version-1118)
 2. [Version 1.1.17](#version-1117)
@@ -59,6 +60,18 @@ This version applies to an environment on Neologik Platform version 5.0, version
 | The pre migration script | The pre migration script refuses `-LegacyMailboxIdentityClientIds`, because the pre migration script removes nothing |
 | The grants for agents and Apps | The guide, the technical breakdown and the README name the source of the grants. From version 5.2 of the Neologik Platform, the grants list **Grants for your administrator** on the **Admin** page of the Neologik Admin Tool gives each grant its own command and script. On version 5.0 or version 5.1, the grants script of the onboarding kit applies the grants |
 | The summary file | The summary file names the client ids of the identities of step 7 |
+| The changes of version 1.2.1 | This version includes every change of version 1.2.1 |
+
+## Version 1.2.1
+
+**Date**: 2026-11-17
+
+This version applies to an environment on Neologik Platform version 5.0, version 5.1 or version 5.2.
+
+| Item | Change |
+|---|---|
+| The pre migration script and the post migration script, the PowerShell modules | When a Microsoft Graph module is missing, the migration script installs version 2.40.0 of the module exactly. Every file of version 2.40.0 carries a valid signature of Microsoft Corporation. The signature check reads version 2.40.0. Before this version, the migration script installed the newest version. Versions 2.41.0, 2.41.1 and 2.41.2 hold the file `Microsoft.Graph.Authentication.Loader.dll` with no signature, so the signature check removed the modules and stopped the run |
+| `docs/MIGRATION-SCRIPT-GUIDE.md` and `docs/MIGRATION-SCRIPT-TECHNICAL-BREAKDOWN.md` | Each document names the version of the Microsoft Graph modules that the migration script installs |
 | The changes of version 1.2.0 | This version includes every change of version 1.2.0 |
 
 ## Version 1.2.0
